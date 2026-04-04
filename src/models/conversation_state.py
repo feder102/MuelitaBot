@@ -12,10 +12,18 @@ from src.db import Base
 class ConversationStateEnum(str, Enum):
     """States in the user conversation flow."""
 
+    # Feature 001: Webhook Menu
     AWAITING_MENU = "AWAITING_MENU"
     AWAITING_SELECTION = "AWAITING_SELECTION"
     APPOINTMENT_SELECTED = "APPOINTMENT_SELECTED"
     SECRETARY_SELECTED = "SECRETARY_SELECTED"
+
+    # Feature 002: Appointment Booking
+    AWAITING_SLOT_SELECTION = "AWAITING_SLOT_SELECTION"  # User viewing available slots
+    AWAITING_REASON_TEXT = "AWAITING_REASON_TEXT"  # User entering consultation reason
+    APPOINTMENT_CONFIRMED = "APPOINTMENT_CONFIRMED"  # Appointment booking confirmed
+
+    # Terminal states
     COMPLETED = "COMPLETED"
     INACTIVE = "INACTIVE"
 
@@ -41,7 +49,7 @@ class ConversationState(Base):
         default=datetime.utcnow,
     )
     menu_display_count = Column(Integer, nullable=False, default=0)
-    metadata = Column(JSON, nullable=True, default={})
+    context_data = Column(JSON, nullable=True, default={})  # Stores conversation context (e.g., available slots)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 

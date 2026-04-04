@@ -5,6 +5,10 @@ uvicorn[standard]==0.24.0
 # HTTP Client
 aiohttp==3.9.1
 
+# Google API Client (Feature 002: Appointment Booking)
+google-auth==2.26.2
+google-api-python-client==2.107.0
+
 # Telegram Bot SDK
 python-telegram-bot==20.3
 

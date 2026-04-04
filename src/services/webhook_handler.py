@@ -3,10 +3,12 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.audit_log import AuditLog, AuditActionEnum, AuditStatusEnum
+from src.models.conversation_state import ConversationStateEnum
 from src.schemas.telegram_webhook import Update
 from src.services.message_parser import MessageParser
 from src.services.conversation_manager import ConversationManager
 from src.services.menu_router import MenuRouter
+from src.services.appointment_router import AppointmentRouter
 from src.utils.telegram_client import TelegramClient
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,7 @@ class WebhookHandler:
         self.message_parser = MessageParser()
         self.conversation_manager = ConversationManager()
         self.menu_router = MenuRouter()
+        self.appointment_router = AppointmentRouter()
 
     async def handle_webhook(
         self,
@@ -90,16 +93,103 @@ class WebhookHandler:
             state = await self.conversation_manager.get_user_state(self.session, user.id)
 
             # Determine action based on state
-            if state.current_state.value in ["APPOINTMENT_SELECTED", "SECRETARY_SELECTED", "COMPLETED"]:
-                # User already selected an option; re-display menu
-                response_message = self.menu_router.get_menu_message()
-                await self.conversation_manager.update_state(
-                    self.session,
-                    user.id,
-                    # Reset state for new menu (or keep in selection state)
+            if state.current_state == ConversationStateEnum.AWAITING_SLOT_SELECTION:
+                # User is viewing appointment slots - expecting slot number input
+                new_state, response_message, selected_slot = await self.appointment_router.validate_slot_selection(
+                    message_text, state.context_data.get("available_slots", [])
                 )
+
+                await self.conversation_manager.update_state(
+                    self.session, user.id, new_state, update_metadata={"selected_slot": selected_slot.dict() if selected_slot else None}
+                )
+
+                await self._log_audit(
+                    user_id=user.id,
+                    action=AuditActionEnum.MENU_SELECTION_MADE,
+                    status=AuditStatusEnum.SUCCESS,
+                    message_text=message_text[:50],
+                    response_text=response_message[:100],
+                    ip_address=ip_address,
+                )
+
+            elif state.current_state == ConversationStateEnum.AWAITING_REASON_TEXT:
+                # User is entering consultation reason
+                selected_slot_data = state.metadata.get("selected_slot")
+                if not selected_slot_data:
+                    # Fallback - shouldn't happen
+                    new_state = ConversationStateEnum.AWAITING_MENU
+                    response_message = self.menu_router.get_menu_message()
+                else:
+                    # Reconstruct AvailableSlot from metadata
+                    from datetime import date, time
+
+                    selected_slot = type("AvailableSlot", (), selected_slot_data)()
+                    selected_slot.date = date.fromisoformat(selected_slot_data["date"])
+                    selected_slot.start_time = time.fromisoformat(selected_slot_data["start_time"])
+                    selected_slot.end_time = time.fromisoformat(selected_slot_data["end_time"])
+
+                    new_state, response_message = await self.appointment_router.validate_and_book_appointment(
+                        user_input=message_text,
+                        patient_user_id=user.id,
+                        selected_slot=selected_slot,
+                        session=self.session,
+                    )
+
+                await self.conversation_manager.update_state(self.session, user.id, new_state)
+
+                await self._log_audit(
+                    user_id=user.id,
+                    action=AuditActionEnum.MENU_SELECTION_MADE,
+                    status=AuditStatusEnum.SUCCESS,
+                    message_text=message_text[:50],
+                    response_text=response_message[:100],
+                    ip_address=ip_address,
+                )
+
+            elif state.current_state == ConversationStateEnum.APPOINTMENT_CONFIRMED:
+                # User just booked - return to menu
+                await self.conversation_manager.update_state(
+                    self.session, user.id, ConversationStateEnum.AWAITING_MENU
+                )
+                response_message = self.menu_router.get_menu_message()
+
+                await self._log_audit(
+                    user_id=user.id,
+                    action=AuditActionEnum.MENU_DISPLAYED,
+                    status=AuditStatusEnum.SUCCESS,
+                    response_text=response_message[:100],
+                    ip_address=ip_address,
+                )
+
+            elif state.current_state.value in ["APPOINTMENT_SELECTED", "SECRETARY_SELECTED", "COMPLETED"]:
+                # Legacy states - redirect to menu or handle
+                if state.current_state.value == "APPOINTMENT_SELECTED":
+                    # User selected appointment; fetch slots
+                    new_state, response_message, available_slots = await self.appointment_router.fetch_and_show_slots()
+
+                    await self.conversation_manager.update_state(
+                        self.session,
+                        user.id,
+                        new_state,
+                        update_metadata={"available_slots": [slot.dict() for slot in available_slots]},
+                    )
+
+                    await self._log_audit(
+                        user_id=user.id,
+                        action=AuditActionEnum.APPOINTMENT_ROUTED,
+                        status=AuditStatusEnum.SUCCESS,
+                        response_text=response_message[:100],
+                        ip_address=ip_address,
+                    )
+                else:
+                    # Other completed states - re-display menu
+                    response_message = self.menu_router.get_menu_message()
+                    await self.conversation_manager.update_state(
+                        self.session, user.id, ConversationStateEnum.AWAITING_MENU
+                    )
+
             else:
-                # Check if this is a menu selection
+                # AWAITING_MENU or AWAITING_SELECTION - check if this is a menu selection
                 selection = self.message_parser.extract_menu_selection(message_text)
 
                 if selection:
@@ -115,7 +205,25 @@ class WebhookHandler:
                         ip_address=ip_address,
                     )
 
-                    if new_state:
+                    # For appointment selection, fetch slots immediately
+                    if new_state.value == "APPOINTMENT_SELECTED":
+                        new_state, response_message, available_slots = await self.appointment_router.fetch_and_show_slots()
+
+                        await self.conversation_manager.update_state(
+                            self.session,
+                            user.id,
+                            new_state,
+                            update_metadata={"available_slots": [slot.dict() for slot in available_slots]},
+                        )
+
+                        await self._log_audit(
+                            user_id=user.id,
+                            action=AuditActionEnum.APPOINTMENT_ROUTED,
+                            status=AuditStatusEnum.SUCCESS,
+                            response_text=response_message[:100],
+                            ip_address=ip_address,
+                        )
+                    elif new_state:
                         await self.conversation_manager.update_state(
                             self.session,
                             user.id,
@@ -123,11 +231,7 @@ class WebhookHandler:
                         )
 
                         # Log routing decision
-                        action = (
-                            AuditActionEnum.APPOINTMENT_ROUTED
-                            if new_state.value == "APPOINTMENT_SELECTED"
-                            else AuditActionEnum.SECRETARY_ROUTED
-                        )
+                        action = AuditActionEnum.SECRETARY_ROUTED if new_state.value == "SECRETARY_SELECTED" else AuditActionEnum.APPOINTMENT_ROUTED
                         await self._log_audit(
                             user_id=user.id,
                             action=action,

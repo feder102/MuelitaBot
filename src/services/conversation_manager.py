@@ -115,9 +115,9 @@ class ConversationManager:
         state.updated_at = datetime.utcnow()
 
         if update_metadata:
-            if state.metadata is None:
-                state.metadata = {}
-            state.metadata.update(update_metadata)
+            if state.context_data is None:
+                state.context_data = {}
+            state.context_data.update(update_metadata)
 
         await session.flush()
         logger.info(f"Updated state for user {user_id} to {new_state}")

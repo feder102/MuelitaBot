@@ -8,6 +8,7 @@ from src.config import settings
 from src.utils.logger import setup_logging
 from src.api.webhook import router as webhook_router
 from src.db import engine, Base
+from src.models import *  # noqa: F401, F403 - Registers all models with Base
 
 # Setup logging
 logger = setup_logging(level=settings.log_level)
