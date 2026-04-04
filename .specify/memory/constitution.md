@@ -1,50 +1,111 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!-- Sync Impact Report
+Version: 1.0.0 → 1.0.0 (initial constitution)
+Ratified: 2026-04-04
+Sections created: Core Principles (5), Security & Compliance, Architecture & Design, Governance
+This is the first constitution for turnoHector project.
+-->
+
+# turnoHector Constitution
+
+Medical appointment management backend: simple, clean code; fast and efficient; extensible to multiple doctors and calendars; meeting highest security standards.
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Clean Code & Simplicity
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+Code must prioritize clarity over cleverness. Each module should have a single, well-defined responsibility. No premature optimization or over-engineering. Complexity must be justified and documented. YAGNI principle enforced: add only what is needed now, not speculative future requirements.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+**Non-negotiable**: If code is not immediately understandable to a new team member without deep investigation, it must be refactored before merge.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### II. Security-First Design
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+This is a medical system handling sensitive patient data. Security is not an afterthought—it is foundational.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+- All patient-related data must be encrypted at rest and in transit (TLS 1.3+)
+- Authentication required for all endpoints; authorization verified on every request
+- No hardcoded credentials, API keys, or secrets in code or git history
+- Input validation on all external data before processing
+- Audit logging for all sensitive operations (appointment creation, access, modifications)
+- SQL injection, XSS, CSRF, and OWASP Top 10 vulnerabilities must be actively prevented
+- Dependencies vetted for known vulnerabilities (regular scanning)
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### III. Performance & Scalability
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+The system must handle concurrent requests efficiently. Response times must remain sub-second for core operations even under load.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+- Database queries optimized; no N+1 queries permitted
+- Caching strategy defined for frequently accessed data (doctor availability, calendar slots)
+- Horizontal scalability must be possible without code refactoring
+- API endpoints document expected latency targets
+- Load testing required before release to production
+
+### IV. Test-First & Reliability
+
+Tests are contracts between intent and implementation. TDD discipline is mandatory.
+
+- Unit tests must cover all business logic (>80% coverage minimum)
+- Integration tests required for appointment booking flows, calendar operations, multi-doctor scenarios
+- Database migrations tested; rollback procedures verified
+- Failing tests must block merges
+- Each feature includes its test suite; they ship together
+
+### V. Extensibility & Data Integrity
+
+The system must cleanly support multiple doctors, calendars, and scheduling rules without code duplication or architectural strain.
+
+- Database schema allows new doctor profiles, calendar systems, and slot definitions without migration pain
+- APIs versioned; changes tracked; backward compatibility maintained or deprecation planned
+- Configuration separate from code (no magic numbers or hardcoded business rules)
+- Data integrity constraints enforced at database layer (foreign keys, not null, unique constraints)
+
+## Security & Compliance
+
+This system handles Protected Health Information (PHI) and must meet medical data protection standards.
+
+- Passwords hashed with bcrypt or equivalent (cost ≥ 12)
+- Rate limiting enforced on authentication endpoints (max 5 failed attempts → 15min lockout)
+- Session tokens time-limited (1 hour max); refresh tokens separate, longer-lived
+- Audit trail immutable: all data modifications logged with timestamp, user, operation type
+- PII retention policy: patient data deleted when appointment expires unless legal hold
+- Error messages must not leak system details to clients; log detailed errors server-side
+- Regular security reviews and penetration testing recommended annually
+
+## Architecture & Design
+
+Medical appointment management is inherently about temporal coordination. The architecture must reflect this clearly.
+
+- **Stateless backend**: Each request contains sufficient context; no per-request session state in memory
+- **Database-as-source-of-truth**: Appointments, availability, calendars all persisted; no in-memory-only data
+- **Event-driven optional**: Consider event logging for appointment lifecycle (created, modified, cancelled) to enable audit, reconciliation, future analytics
+- **Doctor/Calendar abstraction**: Core entities (Doctor, Calendar, Slot, Appointment) cleanly separated; business logic not coupled to storage
+- **Time zone handling**: Explicit; all datetimes stored in UTC; time zone conversions handled at API boundaries
+
+## Development Workflow & Quality Gates
+
+Code quality and security are not optional. Every merge must adhere to constitution.
+
+- **Code Review**: All PRs require at least one review before merge; reviewer must verify security checklist (no secrets, no injection risks, encryption present where needed)
+- **Testing Gate**: All tests must pass; coverage must not decrease; integration tests must run against real database (not mocks)
+- **Security Scan**: Automated scanning for known vulnerabilities in dependencies; manual review of sensitive code paths
+- **Documentation**: Every API endpoint documented (parameters, response, error codes); security assumptions documented in README or ARCHITECTURE.md
+- **Commit Discipline**: Meaningful commit messages; each commit represents a logical unit; no "WIP" commits to main
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+**Constitution Authority**: This constitution supersedes all other practices and guidelines. When practices conflict, constitution wins. Any deviation requires amendment.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Amendment Process**:
+1. Proposed change documented with rationale
+2. Discussion & team consensus (security & architecture leads review)
+3. Constitution updated; version bumped (semantic versioning)
+4. Existing codebase assessed for migration plan (breaking changes require time-bound deadline)
+5. All affected templates and documentation updated
+
+**Versioning Policy**:
+- MAJOR: Principle removal or redefinition; breaking change to development workflow
+- MINOR: New principle added; security requirement added; existing principle clarified
+- PATCH: Typo, wording clarification, example updates
+
+**Compliance Review**: Monthly check that recent merged code aligns with constitution; flag violations in review; remediate within sprint.
+
+**Version**: 1.0.0 | **Ratified**: 2026-04-04 | **Last Amended**: 2026-04-04
