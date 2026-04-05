@@ -294,7 +294,10 @@ class WebhookHandler:
                     # Handle appointment selection immediately without waiting for next message
                     if new_state == ConversationStateEnum.APPOINTMENT_SELECTED:
                         logger.info(f"🚀 Auto-processing APPOINTMENT_SELECTED immediately...")
+                        logger.info(f"   appointment_router: {self.appointment_router}")
+                        logger.info(f"   appointment_router.dentist_service: {self.appointment_router.dentist_service if self.appointment_router else 'N/A'}")
                         new_state, response_message, context_data = await self.appointment_router.handle_appointment_request(session=self.session)
+                        logger.info(f"   ✅ handle_appointment_request() returned: new_state={new_state}, context_data keys={context_data.keys() if context_data else None}")
 
                         update_metadata = {}
                         if context_data:
@@ -321,6 +324,7 @@ class WebhookHandler:
                             )
                             update_metadata["available_slots"] = [slot.dict() for slot in slots]
 
+                        logger.info(f"   Calling update_state with new_state={new_state}, update_metadata={update_metadata.keys() if update_metadata else {}}")
                         await self.conversation_manager.update_state(
                             self.session,
                             user.id,
@@ -328,7 +332,7 @@ class WebhookHandler:
                             update_metadata=update_metadata,
                         )
 
-                        logger.info(f"✅ APPOINTMENT_SELECTED processed, new_state={new_state}")
+                        logger.info(f"✅ APPOINTMENT_SELECTED processed, new_state={new_state}, final response_message={response_message[:60]}...")
                     else:
                         # For other selections (Secretary, etc.), just update state
                         await self.conversation_manager.update_state(
@@ -372,6 +376,7 @@ class WebhookHandler:
                         )
 
             # Send response via Telegram API
+            logger.info(f"📨 Sending message to user {user_id}: {response_message[:100]}...")
             await self.telegram_client.send_message(user_id, response_message)
 
             # Commit changes
