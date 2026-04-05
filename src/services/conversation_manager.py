@@ -1,5 +1,6 @@
 """Conversation state management service."""
 from datetime import datetime
+from typing import Optional
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -18,9 +19,9 @@ class ConversationManager:
     async def get_or_create_user(
         session: AsyncSession,
         telegram_user_id: int,
-        first_name: str,
-        last_name: str = None,
-        username: str = None,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        username: Optional[str] = None,
     ) -> TelegramUser:
         """
         Get existing user or create new one.
@@ -28,7 +29,7 @@ class ConversationManager:
         Args:
             session: Database session
             telegram_user_id: Telegram user ID
-            first_name: User's first name
+            first_name: User's first name (optional, defaults to "Unknown")
             last_name: User's last name (optional)
             username: User's username (optional)
 
@@ -46,10 +47,10 @@ class ConversationManager:
             logger.info(f"Found existing user: {user.id}")
             return user
 
-        # Create new user
+        # Create new user with default first_name if not provided
         user = TelegramUser(
             telegram_user_id=telegram_user_id,
-            first_name=first_name,
+            first_name=first_name or "Unknown",
             last_name=last_name,
             username=username,
         )
@@ -117,7 +118,10 @@ class ConversationManager:
         if update_metadata:
             if state.context_data is None:
                 state.context_data = {}
-            state.context_data.update(update_metadata)
+            # Merge metadata into context_data
+            merged = {**state.context_data, **update_metadata}
+            # Reassign to mark column as dirty for SQLAlchemy
+            state.context_data = merged
 
         await session.flush()
         logger.info(f"Updated state for user {user_id} to {new_state}")

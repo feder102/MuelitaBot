@@ -43,7 +43,7 @@ class GoogleCalendarClient:
     Fetches availability from Google Calendar and generates appointment slots.
     """
 
-    SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+    SCOPES = ["https://www.googleapis.com/auth/calendar"]  # Changed from readonly to allow writes
     MAX_RETRIES = 3
     RETRY_DELAYS = [1, 2, 4]  # Exponential backoff: 1s, 2s, 4s
 
@@ -140,6 +140,7 @@ class GoogleCalendarClient:
         date_end: date,
         business_hours: tuple[time, time] = (time(8, 0), time(13, 0)),
         slot_duration_minutes: int = 60,
+        timezone_str: str = "America/Argentina/Buenos_Aires",
     ) -> list[dict]:
         """Get available appointment slots from Google Calendar.
 
@@ -150,6 +151,7 @@ class GoogleCalendarClient:
             date_end: End date for slot generation
             business_hours: (start_time, end_time) tuple for clinic hours
             slot_duration_minutes: Duration of each slot (default 60 min)
+            timezone_str: Clinic timezone for time calculations
 
         Returns:
             List of available slots with date, start_time, end_time
@@ -169,9 +171,58 @@ class GoogleCalendarClient:
             date_range=(date_start, date_end),
             business_hours=business_hours,
             slot_duration_minutes=slot_duration_minutes,
+            timezone_str=timezone_str,
         )
 
         logger.info(f"Generated {len(slots)} available slots")
+        return slots
+
+    async def get_all_slots(
+        self,
+        date_start: date,
+        date_end: date,
+        database_appointments: list[dict] = None,
+        business_hours: tuple[time, time] = (time(8, 0), time(13, 0)),
+        slot_duration_minutes: int = 60,
+        timezone_str: str = "America/Argentina/Buenos_Aires",
+    ) -> list[dict]:
+        """Get ALL appointment slots (available + booked).
+
+        Returns slots with availability status from both Google Calendar and database.
+
+        Args:
+            date_start: Start date for slot generation
+            date_end: End date for slot generation
+            database_appointments: List of appointments from database
+            business_hours: (start_time, end_time) tuple for clinic hours
+            slot_duration_minutes: Duration of each slot (default 60 min)
+            timezone_str: Clinic timezone for time calculations
+
+        Returns:
+            List of all slots with date, start_time, end_time, is_booked flag
+
+        Raises:
+            GoogleCalendarAPIError: If calendar fetch fails
+        """
+        # Fetch events with retries
+        events = await self._fetch_with_retry(date_start, date_end)
+
+        # Import slot generator
+        from src.services.slot_generator import SlotGenerator
+
+        # Generate all slots (booked + available)
+        slots = SlotGenerator.generate_all_slots(
+            calendar_events=events,
+            database_appointments=database_appointments or [],
+            date_range=(date_start, date_end),
+            business_hours=business_hours,
+            slot_duration_minutes=slot_duration_minutes,
+            timezone_str=timezone_str,
+        )
+
+        available = sum(1 for s in slots if not s['is_booked'])
+        booked = sum(1 for s in slots if s['is_booked'])
+        logger.info(f"Generated {len(slots)} total slots ({available} available, {booked} booked)")
         return slots
 
     async def _fetch_with_retry(self, date_start: date, date_end: date) -> list[dict]:
@@ -218,3 +269,95 @@ class GoogleCalendarClient:
         if last_error:
             raise last_error
         raise GoogleCalendarAPIError("Failed to fetch calendar events after retries")
+
+    async def create_event(
+        self,
+        summary: str,
+        date_start: date,
+        time_start: time,
+        time_end: time,
+        description: str = None,
+        timezone: str = "America/Argentina/Buenos_Aires",
+    ) -> dict:
+        """Create an event in Google Calendar.
+
+        Args:
+            summary: Event title/summary
+            date_start: Event date
+            time_start: Event start time
+            time_end: Event end time
+            description: Optional event description
+            timezone: Timezone for the event
+
+        Returns:
+            Created event dict with id, summary, start, end
+
+        Raises:
+            GoogleCalendarAPIError: If event creation fails
+        """
+        service = self._get_service()
+
+        # Build datetime objects
+        dt_start = datetime.combine(date_start, time_start)
+        dt_end = datetime.combine(date_start, time_end)
+
+        logger.info(
+            f"🔧 Building event: summary='{summary}', "
+            f"start={dt_start.isoformat()}, end={dt_end.isoformat()}, "
+            f"timezone={timezone}, calendar_id={self.calendar_id}"
+        )
+
+        event = {
+            "summary": summary,
+            "start": {
+                "dateTime": dt_start.isoformat(),
+                "timeZone": timezone,
+            },
+            "end": {
+                "dateTime": dt_end.isoformat(),
+                "timeZone": timezone,
+            },
+        }
+
+        if description:
+            event["description"] = description
+            logger.info(f"📝 Event description: {description[:100]}")
+
+        try:
+            logger.info(f"🚀 Sending event creation request to Google Calendar API...")
+            loop = asyncio.get_event_loop()
+            request = service.events().insert(calendarId=self.calendar_id, body=event)
+
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, request.execute), timeout=10.0
+            )
+
+            event_id = result.get('id')
+            event_status = result.get('status')
+            html_link = result.get('htmlLink', 'N/A')
+            logger.info(
+                f"✅ Event created successfully! "
+                f"ID: {event_id}, Status: {event_status}, "
+                f"Summary: {summary}, Link: {html_link}"
+            )
+            return result
+
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ Google Calendar API call timed out after 10s")
+            raise GoogleCalendarTimeoutError("Event creation timed out")
+        except HttpError as e:
+            if e.resp.status == 401:
+                logger.error(f"🔒 Google Calendar authentication failed (401): {e}")
+                raise GoogleCalendarAuthError(f"Invalid credentials: {e}")
+            elif e.resp.status == 403:
+                logger.error(f"🚫 Google Calendar permission denied (403): {e}")
+                raise GoogleCalendarAPIError(f"Permission denied: {e}")
+            elif e.resp.status == 404:
+                logger.error(f"❓ Google Calendar not found (404): {e}")
+                raise GoogleCalendarAPIError(f"Calendar not found: {e}")
+            else:
+                logger.error(f"⚠️ Google Calendar API error ({e.resp.status}): {e}")
+                raise GoogleCalendarAPIError(f"Event creation failed: {e}")
+        except Exception as e:
+            logger.error(f"💥 Unexpected error creating event: {type(e).__name__}: {e}", exc_info=True)
+            raise GoogleCalendarAPIError(f"Unexpected error: {e}")

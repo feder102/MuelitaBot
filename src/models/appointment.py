@@ -3,6 +3,7 @@ from enum import Enum
 from datetime import datetime, date, time
 from uuid import uuid4
 from sqlalchemy import Column, String, Date, Time, DateTime, BigInteger, ForeignKey, Enum as SQLEnum, Text, CheckConstraint, UniqueConstraint, Index
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from src.db import Base
 
@@ -25,11 +26,11 @@ class Appointment(Base):
     __tablename__ = "appointments"
 
     # Identifiers
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
 
     # Booking details
     patient_user_id = Column(
-        BigInteger,
+        UUID(as_uuid=True),
         ForeignKey("telegram_users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -41,7 +42,7 @@ class Appointment(Base):
 
     # Staff tracking
     created_by_user_id = Column(
-        BigInteger,
+        UUID(as_uuid=True),
         ForeignKey("telegram_users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,

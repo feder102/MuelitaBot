@@ -1,6 +1,6 @@
 """Appointment service for appointment booking feature."""
 import pytz
-from datetime import date, time, datetime
+from datetime import date, time, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,20 +58,22 @@ class AppointmentService:
             reason_max_length: Maximum characters for consultation reason
         """
         self.google_calendar_client = google_calendar_client
+        self.clinic_timezone_str = clinic_timezone  # Keep as string for Google Calendar
         self.clinic_timezone = pytz.timezone(clinic_timezone)
         self.reason_max_length = reason_max_length
 
     async def fetch_and_display_slots(
-        self, date_start: Optional[date] = None, date_end: Optional[date] = None
+        self, date_start: Optional[date] = None, date_end: Optional[date] = None, session: Optional[AsyncSession] = None
     ) -> tuple[list[AvailableSlot], str]:
-        """Fetch available slots and format for Telegram display.
+        """Fetch available and booked slots and format for Telegram display.
 
         Args:
             date_start: Start date for slot search (default: today)
             date_end: End date for slot search (default: today + 7 days)
+            session: Database session for fetching appointments
 
         Returns:
-            (available_slots, formatted_message_text)
+            (available_slots_only, formatted_message_text)
 
         Raises:
             GoogleCalendarError: If calendar fetch fails
@@ -79,24 +81,54 @@ class AppointmentService:
         # Set defaults
         today = datetime.now().date()
         if date_start is None:
-            date_start = today + __import__("datetime").timedelta(days=1)  # Tomorrow
+            date_start = today + timedelta(days=1)  # Tomorrow
         if date_end is None:
-            date_end = date_start + __import__("datetime").timedelta(days=7)
+            date_end = date_start + timedelta(days=7)
 
         try:
-            # Fetch available slots from Google Calendar
-            raw_slots = await self.google_calendar_client.get_available_slots(
+            # Fetch all appointments from database
+            database_appointments = []
+            if session:
+                stmt = select(Appointment).where(
+                    and_(
+                        Appointment.appointment_date >= date_start,
+                        Appointment.appointment_date <= date_end,
+                        Appointment.status == AppointmentStatusEnum.PENDING
+                    )
+                )
+                result = await session.execute(stmt)
+                db_appts = result.scalars().all()
+                database_appointments = [
+                    {
+                        "appointment_date": appt.appointment_date,
+                        "start_time": appt.start_time,
+                        "end_time": appt.end_time,
+                    }
+                    for appt in db_appts
+                ]
+
+            # Fetch ALL slots (available + booked) from Google Calendar + DB
+            all_slots = await self.google_calendar_client.get_all_slots(
                 date_start=date_start,
                 date_end=date_end,
+                database_appointments=database_appointments,
                 business_hours=(time(8, 0), time(13, 0)),
+                timezone_str=self.clinic_timezone_str,
             )
 
-            if not raw_slots:
+            if not all_slots:
                 return [], "No hay turnos disponibles en este momento. Contáctanos."
 
-            # Format slots for Telegram display
+            # Separate available and booked slots
+            available_slots = [s for s in all_slots if not s['is_booked']]
+            booked_slots = [s for s in all_slots if s['is_booked']]
+
+            if not available_slots:
+                return [], "No hay turnos disponibles en este momento. Contáctanos."
+
+            # Format available slots for selection (numbered 1, 2, 3...)
             display_slots = []
-            for i, slot in enumerate(raw_slots, start=1):
+            for i, slot in enumerate(available_slots, start=1):
                 slot_date = slot["date"]
                 slot_start = slot["start_time"]
                 slot_end = slot["end_time"]
@@ -116,13 +148,29 @@ class AppointmentService:
                 )
                 display_slots.append(display_slot)
 
-            # Format message for Telegram
+            # Format message for Telegram showing ALL slots (available + booked)
             message = "Disponibilidad de turnos:\n"
-            for slot in display_slots:
-                message += f"{slot.slot_number}. {slot.date_display}, {slot.time_display}\n"
+
+            # Show all slots in chronological order with status
+            slot_counter = 1
+            for slot in all_slots:
+                slot_date = slot["date"]
+                slot_start = slot["start_time"]
+                slot_end = slot["end_time"]
+                is_booked = slot["is_booked"]
+
+                date_display = self._format_date_spanish(slot_date)
+                time_display = f"{slot_start.strftime('%H:%M')}-{slot_end.strftime('%H:%M')}"
+
+                if is_booked:
+                    message += f"❌ {date_display}, {time_display} - Ocupado\n"
+                else:
+                    message += f"{slot_counter}. {date_display}, {time_display} ✅\n"
+                    slot_counter += 1
+
             message += f"\nEscoge el turno deseado (1-{len(display_slots)}):"
 
-            logger.info(f"Generated {len(display_slots)} available slots for display")
+            logger.info(f"Generated {len(display_slots)} available slots, {len(booked_slots)} booked for display")
             return display_slots, message
 
         except GoogleCalendarTimeoutError:
@@ -192,7 +240,7 @@ class AppointmentService:
         created_by_phone: Optional[str] = None,
         session: Optional[AsyncSession] = None,
     ) -> Appointment:
-        """Book an appointment in the database.
+        """Book an appointment in the database and create event in Google Calendar.
 
         Args:
             patient_user_id: Telegram user ID of patient
@@ -226,13 +274,50 @@ class AppointmentService:
                 session.add(appointment)
                 await session.flush()  # Check constraints before commit
 
+            logger.info(f"✓ Appointment saved to DB: {appointment.id}")
+
+            # Create event in Google Calendar
+            logger.info(f"🔗 About to create Google Calendar event...")
+            try:
+                logger.info(
+                    f"📅 Creating Google Calendar event: "
+                    f"date={selected_slot.date}, "
+                    f"time={selected_slot.start_time}-{selected_slot.end_time}, "
+                    f"reason={reason[:50]}"
+                )
+                google_event = await self.google_calendar_client.create_event(
+                    summary=f"Cita: {reason[:50]}",
+                    date_start=selected_slot.date,
+                    time_start=selected_slot.start_time,
+                    time_end=selected_slot.end_time,
+                    description=f"Paciente: {patient_user_id}\nMotivo: {reason}",
+                    timezone=self.clinic_timezone_str,
+                )
+                event_id = google_event.get('id')
+                event_link = google_event.get('htmlLink', '')
+                logger.info(
+                    f"✅ Google Calendar event created successfully! "
+                    f"Event ID: {event_id}, "
+                    f"Link: {event_link}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"❌ Failed to create Google Calendar event: {type(e).__name__}: {e}",
+                    exc_info=True
+                )
+                # Don't fail the booking if calendar creation fails
+
             logger.info(
                 f"Booked appointment for user {patient_user_id} on "
-                f"{selected_slot.start_time} (reason: {reason[:50]}...)"
+                f"{selected_slot.date} {selected_slot.start_time} (reason: {reason[:50]}...)"
             )
             return appointment
 
         except IntegrityError as e:
+            # Rollback session to recover from error state
+            if session:
+                await session.rollback()
+
             # Handle UNIQUE constraint violation (concurrent booking)
             if "uq_appointment_slot" in str(e):
                 logger.warning(f"Concurrent booking detected for {selected_slot.start_time}")

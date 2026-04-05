@@ -36,13 +36,19 @@ class MessageParser:
 
         message = update.message
         chat = message.chat
+        user = message.from_
+
+        # Use from_ object's user info (preferred), fall back to chat info
+        first_name = user.first_name if user else chat.first_name
+        last_name = user.last_name if user else chat.last_name
+        username = user.username if user else chat.username
 
         parsed = {
             "update_id": update.update_id,
             "user_id": chat.id,
-            "first_name": chat.first_name,
-            "last_name": chat.last_name,
-            "username": chat.username,
+            "first_name": first_name,
+            "last_name": last_name,
+            "username": username,
             "message_text": message.text,
             "message_id": message.message_id,
             "timestamp": message.date,

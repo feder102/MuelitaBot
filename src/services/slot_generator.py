@@ -1,6 +1,7 @@
 """Slot generation logic for appointment booking feature."""
 from datetime import date, time, datetime, timedelta
 from typing import Optional
+import pytz
 
 from src.utils.logger import get_logger
 
@@ -16,6 +17,7 @@ class SlotGenerator:
         date_range: tuple[date, date],
         business_hours: tuple[time, time] = (time(8, 0), time(13, 0)),
         slot_duration_minutes: int = 60,
+        timezone_str: str = "America/Argentina/Buenos_Aires",
     ) -> list[dict]:
         """Generate available appointment slots.
 
@@ -28,6 +30,7 @@ class SlotGenerator:
             date_range: (start_date, end_date) tuple for slot generation period
             business_hours: (start_time, end_time) tuple for clinic hours (default 08:00-13:00)
             slot_duration_minutes: Duration of each slot in minutes (default 60)
+            timezone_str: Clinic timezone string (default America/Argentina/Buenos_Aires)
 
         Returns:
             List of available slots, each a dict with:
@@ -37,9 +40,10 @@ class SlotGenerator:
         """
         date_start, date_end = date_range
         business_start, business_end = business_hours
+        tz = pytz.timezone(timezone_str)
 
         # Parse booked times from calendar events
-        booked_times = SlotGenerator._parse_booked_times(calendar_events)
+        booked_times = SlotGenerator._parse_booked_times(calendar_events, timezone_str)
 
         available_slots = []
         current_date = date_start
@@ -58,8 +62,9 @@ class SlotGenerator:
                         break
 
                     # Check if this slot is booked
-                    slot_datetime_start = datetime.combine(current_date, slot_start)
-                    slot_datetime_end = datetime.combine(current_date, slot_end_time)
+                    # Create timezone-aware datetimes in clinic timezone
+                    slot_datetime_start = tz.localize(datetime.combine(current_date, slot_start))
+                    slot_datetime_end = tz.localize(datetime.combine(current_date, slot_end_time))
 
                     if not SlotGenerator._is_slot_booked(
                         slot_datetime_start, slot_datetime_end, booked_times
@@ -81,16 +86,125 @@ class SlotGenerator:
         return available_slots
 
     @staticmethod
-    def _parse_booked_times(calendar_events: list[dict]) -> list[tuple[datetime, datetime]]:
+    def generate_all_slots(
+        calendar_events: list[dict],
+        database_appointments: list[dict],
+        date_range: tuple[date, date],
+        business_hours: tuple[time, time] = (time(8, 0), time(13, 0)),
+        slot_duration_minutes: int = 60,
+        timezone_str: str = "America/Argentina/Buenos_Aires",
+    ) -> list[dict]:
+        """Generate ALL appointment slots (available + booked).
+
+        Returns slots with availability status.
+
+        Args:
+            calendar_events: List of Google Calendar event dicts
+            database_appointments: List of appointment dicts from database
+            date_range: (start_date, end_date) tuple for slot generation period
+            business_hours: (start_time, end_time) tuple for clinic hours
+            slot_duration_minutes: Duration of each slot in minutes
+            timezone_str: Clinic timezone string
+
+        Returns:
+            List of all slots, each a dict with:
+            - date: date object
+            - start_time: time object
+            - end_time: time object
+            - is_booked: boolean (True if booked in calendar or DB)
+        """
+        date_start, date_end = date_range
+        business_start, business_end = business_hours
+        tz = pytz.timezone(timezone_str)
+
+        # Parse booked times from both Google Calendar and database
+        calendar_booked = SlotGenerator._parse_booked_times(calendar_events, timezone_str)
+        db_booked = SlotGenerator._parse_database_booked_times(database_appointments, timezone_str)
+        all_booked = calendar_booked + db_booked
+
+        all_slots = []
+        current_date = date_start
+
+        # Iterate through date range
+        while current_date <= date_end:
+            # Only generate slots for Monday-Friday
+            if current_date.weekday() < 5:
+                slot_start = business_start
+                while slot_start < business_end:
+                    slot_end_time = SlotGenerator._add_minutes(slot_start, slot_duration_minutes)
+
+                    # Check if slot end exceeds business hours
+                    if slot_end_time > business_end:
+                        break
+
+                    # Check if this slot is booked
+                    slot_datetime_start = tz.localize(datetime.combine(current_date, slot_start))
+                    slot_datetime_end = tz.localize(datetime.combine(current_date, slot_end_time))
+
+                    is_booked = SlotGenerator._is_slot_booked(
+                        slot_datetime_start, slot_datetime_end, all_booked
+                    )
+
+                    all_slots.append(
+                        {
+                            "date": current_date,
+                            "start_time": slot_start,
+                            "end_time": slot_end_time,
+                            "is_booked": is_booked,
+                        }
+                    )
+
+                    slot_start = slot_end_time
+
+            current_date += timedelta(days=1)
+
+        logger.info(f"Generated {len(all_slots)} total slots ({sum(1 for s in all_slots if s['is_booked'])} booked)")
+        return all_slots
+
+    @staticmethod
+    def _parse_database_booked_times(appointments: list[dict], timezone_str: str = "America/Argentina/Buenos_Aires") -> list[tuple[datetime, datetime]]:
+        """Extract booked time ranges from database appointments.
+
+        Args:
+            appointments: List of appointment dicts from database
+            timezone_str: Clinic timezone
+
+        Returns:
+            List of (start_datetime, end_datetime) tuples in clinic timezone
+        """
+        booked_times = []
+        tz = pytz.timezone(timezone_str)
+
+        for appt in appointments:
+            try:
+                appt_date = appt.get("appointment_date")
+                start_time = appt.get("start_time")
+                end_time = appt.get("end_time")
+
+                if appt_date and start_time and end_time:
+                    # Combine date and time, then localize to timezone
+                    start_dt = tz.localize(datetime.combine(appt_date, start_time))
+                    end_dt = tz.localize(datetime.combine(appt_date, end_time))
+                    booked_times.append((start_dt, end_dt))
+            except Exception as e:
+                logger.warning(f"Failed to parse database appointment: {e}, appt={appt}")
+                continue
+
+        return booked_times
+
+    @staticmethod
+    def _parse_booked_times(calendar_events: list[dict], timezone_str: str = "America/Argentina/Buenos_Aires") -> list[tuple[datetime, datetime]]:
         """Extract booked time ranges from Google Calendar events.
 
         Args:
             calendar_events: List of calendar event dicts from Google Calendar API
+            timezone_str: Clinic timezone for converting times
 
         Returns:
-            List of (start_datetime, end_datetime) tuples
+            List of (start_datetime, end_datetime) tuples in clinic timezone
         """
         booked_times = []
+        tz = pytz.timezone(timezone_str)
 
         for event in calendar_events:
             try:
@@ -108,17 +222,20 @@ class SlotGenerator:
                         # Parse ISO 8601 format with timezone
                         start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
                         end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-                        # Convert to naive datetime (UTC)
-                        start_dt = start_dt.replace(tzinfo=None)
-                        end_dt = end_dt.replace(tzinfo=None)
+                        # Convert to clinic timezone (not UTC)
+                        start_dt = start_dt.astimezone(tz)
+                        end_dt = end_dt.astimezone(tz)
                     else:
-                        start_dt = datetime.fromisoformat(start_str)
-                        end_dt = datetime.fromisoformat(end_str)
+                        # Naive datetime - assume clinic timezone
+                        start_dt = tz.localize(datetime.fromisoformat(start_str))
+                        end_dt = tz.localize(datetime.fromisoformat(end_str))
 
                     booked_times.append((start_dt, end_dt))
                 elif "date" in start_info:
                     # All-day event - skip (full day is blocked)
-                    start_date = datetime.strptime(start_info["date"], "%Y-%m-%d")
+                    start_date_obj = datetime.strptime(start_info["date"], "%Y-%m-%d")
+                    # Make timezone-aware for all-day events
+                    start_date = tz.localize(start_date_obj)
                     booked_times.append((start_date, start_date + timedelta(days=1)))
             except (KeyError, ValueError) as e:
                 logger.warning(f"Failed to parse calendar event: {e}, event={event}")

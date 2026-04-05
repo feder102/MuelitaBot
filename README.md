@@ -88,6 +88,9 @@ alembic upgrade head
 
 ```bash
 # Development with auto-reload
+python3 src/main.py
+
+# Or with uvicorn directly:
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 
 # View API docs
@@ -95,7 +98,56 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 # http://localhost:8000/redoc (ReDoc)
 ```
 
-### 5. Setup Telegram Webhook
+### 4a. Viewing Logs
+
+The application outputs detailed logs to help track the booking flow:
+
+```bash
+# All logs go to stdout automatically
+# Run the app and watch for these key logs:
+
+# When user selects appointment (sends "1"):
+📋 Initializing AppointmentRouter...
+🔍 fetch_and_show_slots() called
+📅 Fetching slots from YYYY-MM-DD to YYYY-MM-DD
+✅ Got 25 slots from service
+
+# When user selects a slot (sends "1"):
+📊 AWAITING_SLOT_SELECTION: user_input=1, available_slots=25
+✅ Slot validation result: new_state=AWAITING_REASON_TEXT
+
+# When user enters consultation reason:
+📋 AWAITING_REASON_TEXT: Processing user reason input
+✓ Found selected_slot in context_data
+🔍 Validating reason: 'Consulta de rutina'
+📝 Booking appointment: patient=<uuid>, slot=YYYY-MM-DD HH:MM:SS-HH:MM:SS
+
+# When Google Calendar event is created:
+✓ Appointment saved to DB
+🔗 About to create Google Calendar event...
+📅 Creating Google Calendar event: date=YYYY-MM-DD
+🔧 Building event: summary='Cita: Consulta de rutina'
+🚀 Sending event creation request to Google Calendar API...
+✅ Google Calendar event created successfully! Event ID: <event_id>
+✅ Appointment booked successfully!
+```
+
+**To see logs with timestamps and levels**:
+```bash
+# The default logging shows JSON format. You can tail the output:
+python3 src/main.py 2>&1 | tee logs.txt
+
+# Or filter for specific keywords:
+python3 src/main.py 2>&1 | grep "✅\|❌\|📅\|📋"
+```
+
+**Log Levels** (set in `.env`):
+- `LOG_LEVEL=DEBUG` - All logs including SQL queries
+- `LOG_LEVEL=INFO` - Normal operation (default)
+- `LOG_LEVEL=WARNING` - Only warnings and errors
+- `LOG_LEVEL=ERROR` - Only errors
+
+### 6. Setup Telegram Webhook
 
 ```bash
 # Get your public URL (using ngrok for local development):
@@ -120,7 +172,7 @@ print(response.json())  # Should show "ok": true
 EOF
 ```
 
-### 6. Test with Telegram Bot
+### 7. Test with Telegram Bot
 
 1. Find your bot: `@yourbot_username`
 2. Send any message → Bot responds with menu
