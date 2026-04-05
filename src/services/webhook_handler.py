@@ -1,5 +1,6 @@
 """Webhook processing and orchestration service."""
 import logging
+from datetime import date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.audit_log import AuditLog, AuditActionEnum, AuditStatusEnum
@@ -290,6 +291,50 @@ class WebhookHandler:
 
                     logger.info(f"🎯 Menu selection: selection={selection}, new_state={new_state}, new_state.value={new_state.value if new_state else None}")
 
+                    # Handle appointment selection immediately without waiting for next message
+                    if new_state == ConversationStateEnum.APPOINTMENT_SELECTED:
+                        logger.info(f"🚀 Auto-processing APPOINTMENT_SELECTED immediately...")
+                        new_state, response_message, context_data = await self.appointment_router.handle_appointment_request(session=self.session)
+
+                        update_metadata = {}
+                        if context_data:
+                            if "selected_dentist_id" in context_data:
+                                update_metadata["selected_dentist_id"] = context_data["selected_dentist_id"]
+                            if "available_dentists" in context_data:
+                                update_metadata["available_dentists"] = context_data["available_dentists"]
+                                update_metadata["dentist_names"] = context_data.get("dentist_names", {})
+
+                        # If single dentist auto-selected, fetch and store available slots
+                        if new_state == ConversationStateEnum.AWAITING_SLOT_SELECTION:
+                            dentist_id = None
+                            if "selected_dentist_id" in context_data:
+                                from uuid import UUID
+                                dentist_id = UUID(context_data["selected_dentist_id"])
+
+                            tomorrow = date.today() + timedelta(days=1)
+                            next_week = tomorrow + timedelta(days=7)
+                            slots, _ = await self.appointment_router.appointment_service.fetch_and_display_slots(
+                                date_start=tomorrow,
+                                date_end=next_week,
+                                session=self.session,
+                                dentist_id=dentist_id,
+                            )
+                            update_metadata["available_slots"] = [slot.dict() for slot in slots]
+
+                        await self.conversation_manager.update_state(
+                            self.session,
+                            user.id,
+                            new_state,
+                            update_metadata=update_metadata,
+                        )
+
+                        logger.info(f"✅ APPOINTMENT_SELECTED processed, new_state={new_state}")
+                    else:
+                        # For other selections (Secretary, etc.), just update state
+                        await self.conversation_manager.update_state(
+                            self.session, user.id, new_state
+                        )
+
                     await self._log_audit(
                         user_id=user.id,
                         action=AuditActionEnum.MENU_SELECTION_MADE,
@@ -298,50 +343,6 @@ class WebhookHandler:
                         response_text=response_message[:100],
                         ip_address=ip_address,
                     )
-
-                    # For appointment selection, fetch slots immediately
-                    if new_state and new_state.value == "APPOINTMENT_SELECTED":
-                        if not self.appointment_router:
-                            logger.error(f"❌ appointment_router is None - cannot fetch slots!")
-                            response_message = "Sistema de turnos no disponible. Contacta a la secretaria."
-                            available_slots = []
-                        else:
-                            new_state, response_message, available_slots = await self.appointment_router.fetch_and_show_slots(session=self.session)
-
-                        logger.info(f"🎯 Fetched {len(available_slots)} slots for user {user.id}")
-
-                        await self.conversation_manager.update_state(
-                            self.session,
-                            user.id,
-                            new_state,
-                            update_metadata={"available_slots": [slot.model_dump(mode='json') for slot in available_slots]},
-                        )
-
-                        logger.info(f"💾 Saved {len(available_slots)} slots to context_data for state {new_state}")
-
-                        await self._log_audit(
-                            user_id=user.id,
-                            action=AuditActionEnum.APPOINTMENT_ROUTED,
-                            status=AuditStatusEnum.SUCCESS,
-                            response_text=response_message[:100],
-                            ip_address=ip_address,
-                        )
-                    elif new_state:
-                        await self.conversation_manager.update_state(
-                            self.session,
-                            user.id,
-                            new_state,
-                        )
-
-                        # Log routing decision
-                        action = AuditActionEnum.SECRETARY_ROUTED if new_state.value == "SECRETARY_SELECTED" else AuditActionEnum.APPOINTMENT_ROUTED
-                        await self._log_audit(
-                            user_id=user.id,
-                            action=action,
-                            status=AuditStatusEnum.SUCCESS,
-                            message_text=selection,
-                            ip_address=ip_address,
-                        )
                 else:
                     # No selection; display or re-display menu
                     await self.conversation_manager.increment_menu_display_count(
