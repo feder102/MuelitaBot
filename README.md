@@ -391,6 +391,236 @@ Structured JSON logging to stdout:
 2. Ensure raw request body is used for validation (not parsed JSON)
 3. Check ngrok/tunnel headers aren't modifying signature
 
+## Managing Dentists (Multi-Dentist Support) ✅ ACTIVE
+
+The system supports multiple dentists, each with their own Google Calendar for appointment booking.
+
+### How Calendar IDs Work
+
+**Important:** When you add a dentist with their calendar ID, that ID is stored in the database and used automatically:
+
+```
+Database (dentists table)
+    ├── Hector → ae78cb2baac...@group.calendar.google.com
+    └── Fulano → 763763f89...@group.calendar.google.com
+            ↓
+When booking appointment:
+    └─→ Retrieved from DB → Passed to Google Calendar API
+            ↓
+Event created in THAT DENTIST'S calendar (NOT the .env calendar)
+```
+
+The `.env` `GOOGLE_CALENDAR_ID` is only used as a fallback. The system automatically retrieves each dentist's calendar ID from the database.
+
+### ⚡ Quick Command to Add a Dentist
+
+```bash
+python scripts/seed_dentists.py "Doctor Name" "calendar_id@clinic.calendar.google.com"
+```
+
+#### Examples:
+
+```bash
+# Add Hector
+python3 scripts/seed_dentists.py "Hector" "hector@clinic.calendar.google.com"
+
+# Add Fulano
+python3 scripts/seed_dentists.py "Fulano" "fulano@clinic.calendar.google.com"
+
+# Add Dr. García
+python3 scripts/seed_dentists.py "Dr. García" "garcia@clinic.calendar.google.com"
+```
+
+**Output:**
+```
+➕ Adding dentist: Hector
+✅ Created dentist: Hector (ID: cb631d65-b84a-4b5b-9bbb-79e21eaa2b8a)
+✅ Dentist seeded successfully
+```
+
+**Current Dentists in System:**
+- ✅ **Hector** - `ae78cb2baac3e3318905a077b189140ef6226295e16f337fadb249caa483ea80@group.calendar.google.com`
+- ✅ **Fulano** - `763763f89e73f62085b6f2f9f0c6eebdd214fb2507dbaf88a5de70f32dd620c4@group.calendar.google.com`
+
+### What Happens After Adding a Doctor
+
+✅ **Immediately available** in the appointment selection menu  
+✅ **Calendar is linked** to their Google Calendar  
+✅ **No code changes** required - fully database-driven  
+✅ **Appears in bot menu** on next user interaction
+
+### 📂 Alternative: Bulk Import from JSON
+
+For adding multiple doctors at once:
+
+```bash
+# Create dentists.json
+python scripts/seed_dentists.py --file dentists.json
+```
+
+**dentists.json format:**
+```json
+[
+    {
+        "name": "Hector",
+        "calendar_id": "hector@clinic.calendar.google.com",
+        "active_status": true
+    },
+    {
+        "name": "Fulano",
+        "calendar_id": "fulano@clinic.calendar.google.com",
+        "active_status": true
+    }
+]
+```
+
+See `scripts/dentists.json.example` for template.
+
+### ✅ Test Multi-Dentist Flow
+
+Verify that the multi-dentist booking system is working correctly:
+
+```bash
+python3 scripts/test_multi_dentist_flow.py
+```
+
+**What it checks:**
+- ✅ All active dentists are retrievable from database
+- ✅ Appointment slots are fetched from each dentist's calendar
+- ✅ Calendar IDs match between database and Google Calendar API
+- ✅ Appointment model correctly links to dentist
+- ✅ Multi-dentist support is enabled
+
+**Expected output:**
+```
+🦷 MULTI-DENTIST APPOINTMENT BOOKING FLOW TEST
+✅ Found 2 active dentist(s)
+   1. Hector → ae78cb2ba...@group.calendar.google.com
+   2. Fulano → 763763f89...@group.calendar.google.com
+✅ Retrieved 30 slot(s) for Hector
+✅ Retrieved 30 slot(s) for Fulano
+✅ Hector's calendar ID: ae78cb2ba...@group.calendar.google.com (Matches stored value)
+✅ Fulano's calendar ID: 763763f89...@group.calendar.google.com (Matches stored value)
+✨ The system is ready to handle multiple dentists!
+```
+
+### 📋 View All Dentists
+
+```bash
+# Quick Python script to list all doctors:
+python3 << 'EOF'
+import asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from src.config import settings
+
+async def list_dentists():
+    engine = create_async_engine(settings.database_url)
+    async_session = async_sessionmaker(engine, class_=AsyncSession)
+    async with async_session() as session:
+        result = await session.execute(text(
+            "SELECT name, calendar_id, active_status FROM dentists ORDER BY name"
+        ))
+        print("\n📋 Doctors:\n")
+        for name, cal, active in result:
+            status = "🟢 ACTIVE" if active else "🔴 INACTIVE"
+            print(f"  {name:20} → {cal:45} {status}")
+    await engine.dispose()
+
+asyncio.run(list_dentists())
+EOF
+```
+
+### 🔧 Deactivate a Doctor
+
+The doctor will no longer appear in the booking menu:
+
+```bash
+python3 << 'EOF'
+import asyncio
+from sqlalchemy import text, update
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from src.config import settings
+
+async def deactivate(name):
+    engine = create_async_engine(settings.database_url)
+    async_session = async_sessionmaker(engine, class_=AsyncSession)
+    async with async_session() as session:
+        await session.execute(
+            update("dentists").where(text(f"name = '{name}'")).values(active_status=False)
+        )
+        await session.commit()
+        print(f"✅ Deactivated: {name}")
+    await engine.dispose()
+
+asyncio.run(deactivate("Hector"))
+EOF
+```
+
+### 🔄 Update a Doctor's Calendar
+
+If the doctor's Google Calendar changes:
+
+```bash
+python3 << 'EOF'
+import asyncio
+from sqlalchemy import text, update
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from src.config import settings
+
+async def update_calendar(name, new_cal):
+    engine = create_async_engine(settings.database_url)
+    async_session = async_sessionmaker(engine, class_=AsyncSession)
+    async with async_session() as session:
+        await session.execute(
+            update("dentists").where(text(f"name = '{name}'")).values(calendar_id=new_cal)
+        )
+        await session.commit()
+        print(f"✅ Updated {name} → {new_cal}")
+    await engine.dispose()
+
+asyncio.run(update_calendar("Hector", "hector.new@clinic.calendar.google.com"))
+EOF
+```
+
+### 👥 User Experience
+
+**Single Dentist Clinic:**
+```
+User: 1 (Solicitar turno)
+Bot: [Auto-selects doctor]
+     [Shows available slots immediately]
+```
+
+**Multi-Dentist Clinic:**
+```
+User: 1 (Solicitar turno)
+Bot: ¿A qué odontólogo deseas pedir turno?
+     1. Hector
+     2. Fulano
+     3. Dr. García
+
+User: 2
+Bot: [Shows available slots for Fulano]
+```
+
+### 📊 Database Schema
+
+```sql
+-- Dentist table (NEW)
+CREATE TABLE dentists (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL UNIQUE,
+    calendar_id VARCHAR(255) NOT NULL UNIQUE,
+    active_status BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Appointments table (EXTENDED)
+ALTER TABLE appointments ADD COLUMN dentist_id UUID FOREIGN KEY REFERENCES dentists(id);
+```
+
 ## Contributing
 
 - Follow PEP 8 style guide

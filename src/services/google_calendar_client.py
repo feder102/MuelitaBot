@@ -77,13 +77,14 @@ class GoogleCalendarClient:
         return self.service
 
     async def get_calendar_events(
-        self, date_start: date, date_end: date
+        self, date_start: date, date_end: date, calendar_id: str = None
     ) -> list[dict]:
         """Fetch raw events from Google Calendar API.
 
         Args:
             date_start: Start date for event search
             date_end: End date for event search
+            calendar_id: Optional specific calendar ID (overrides default)
 
         Returns:
             List of calendar event dicts with start, end, summary
@@ -94,6 +95,9 @@ class GoogleCalendarClient:
         """
         service = self._get_service()
 
+        # Use provided calendar_id or default
+        effective_calendar_id = calendar_id if calendar_id else self.calendar_id
+
         # Build datetime boundaries (all day boundaries)
         time_min = datetime.combine(date_start, time.min).isoformat() + "Z"
         time_max = datetime.combine(date_end + timedelta(days=1), time.min).isoformat() + "Z"
@@ -102,7 +106,7 @@ class GoogleCalendarClient:
             # Run API call in executor to avoid blocking
             loop = asyncio.get_event_loop()
             request = service.events().list(
-                calendarId=self.calendar_id,
+                calendarId=effective_calendar_id,
                 timeMin=time_min,
                 timeMax=time_max,
                 singleEvents=True,
@@ -185,6 +189,7 @@ class GoogleCalendarClient:
         business_hours: tuple[time, time] = (time(8, 0), time(13, 0)),
         slot_duration_minutes: int = 60,
         timezone_str: str = "America/Argentina/Buenos_Aires",
+        calendar_id: str = None,
     ) -> list[dict]:
         """Get ALL appointment slots (available + booked).
 
@@ -197,6 +202,7 @@ class GoogleCalendarClient:
             business_hours: (start_time, end_time) tuple for clinic hours
             slot_duration_minutes: Duration of each slot (default 60 min)
             timezone_str: Clinic timezone for time calculations
+            calendar_id: Optional specific calendar ID (overrides default)
 
         Returns:
             List of all slots with date, start_time, end_time, is_booked flag
@@ -204,8 +210,11 @@ class GoogleCalendarClient:
         Raises:
             GoogleCalendarAPIError: If calendar fetch fails
         """
+        # Use provided calendar_id or default
+        effective_calendar_id = calendar_id if calendar_id else self.calendar_id
+
         # Fetch events with retries
-        events = await self._fetch_with_retry(date_start, date_end)
+        events = await self._fetch_with_retry(date_start, date_end, calendar_id=effective_calendar_id)
 
         # Import slot generator
         from src.services.slot_generator import SlotGenerator
@@ -225,12 +234,13 @@ class GoogleCalendarClient:
         logger.info(f"Generated {len(slots)} total slots ({available} available, {booked} booked)")
         return slots
 
-    async def _fetch_with_retry(self, date_start: date, date_end: date) -> list[dict]:
+    async def _fetch_with_retry(self, date_start: date, date_end: date, calendar_id: str = None) -> list[dict]:
         """Fetch calendar events with exponential backoff retry logic.
 
         Args:
             date_start: Start date
             date_end: End date
+            calendar_id: Optional specific calendar ID
 
         Returns:
             List of calendar events
@@ -242,7 +252,7 @@ class GoogleCalendarClient:
 
         for attempt in range(self.MAX_RETRIES):
             try:
-                return await self.get_calendar_events(date_start, date_end)
+                return await self.get_calendar_events(date_start, date_end, calendar_id=calendar_id)
             except GoogleCalendarTimeoutError as e:
                 last_error = e
                 if attempt < self.MAX_RETRIES - 1:
@@ -278,6 +288,7 @@ class GoogleCalendarClient:
         time_end: time,
         description: str = None,
         timezone: str = "America/Argentina/Buenos_Aires",
+        calendar_id: str = None,
     ) -> dict:
         """Create an event in Google Calendar.
 
@@ -288,6 +299,7 @@ class GoogleCalendarClient:
             time_end: Event end time
             description: Optional event description
             timezone: Timezone for the event
+            calendar_id: Optional specific calendar ID (overrides default)
 
         Returns:
             Created event dict with id, summary, start, end
@@ -297,6 +309,9 @@ class GoogleCalendarClient:
         """
         service = self._get_service()
 
+        # Use provided calendar_id or default
+        effective_calendar_id = calendar_id if calendar_id else self.calendar_id
+
         # Build datetime objects
         dt_start = datetime.combine(date_start, time_start)
         dt_end = datetime.combine(date_start, time_end)
@@ -304,7 +319,7 @@ class GoogleCalendarClient:
         logger.info(
             f"🔧 Building event: summary='{summary}', "
             f"start={dt_start.isoformat()}, end={dt_end.isoformat()}, "
-            f"timezone={timezone}, calendar_id={self.calendar_id}"
+            f"timezone={timezone}, calendar_id={effective_calendar_id}"
         )
 
         event = {
@@ -326,7 +341,7 @@ class GoogleCalendarClient:
         try:
             logger.info(f"🚀 Sending event creation request to Google Calendar API...")
             loop = asyncio.get_event_loop()
-            request = service.events().insert(calendarId=self.calendar_id, body=event)
+            request = service.events().insert(calendarId=effective_calendar_id, body=event)
 
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, request.execute), timeout=10.0

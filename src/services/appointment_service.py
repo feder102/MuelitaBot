@@ -2,6 +2,7 @@
 import pytz
 from datetime import date, time, datetime, timedelta
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +16,7 @@ from src.services.google_calendar_client import (
     GoogleCalendarTimeoutError,
 )
 from src.services.slot_generator import SlotGenerator
+from src.services.dentist_service import DentistService, DentistNotFoundError
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -47,6 +49,7 @@ class AppointmentService:
     def __init__(
         self,
         google_calendar_client: GoogleCalendarClient,
+        dentist_service: Optional[DentistService] = None,
         clinic_timezone: str = "America/Argentina/Buenos_Aires",
         reason_max_length: int = 150,
     ):
@@ -54,16 +57,22 @@ class AppointmentService:
 
         Args:
             google_calendar_client: Initialized GoogleCalendarClient
+            dentist_service: DentistService for multi-dentist support (optional)
             clinic_timezone: Timezone for clinic (default Argentina)
             reason_max_length: Maximum characters for consultation reason
         """
         self.google_calendar_client = google_calendar_client
+        self.dentist_service = dentist_service
         self.clinic_timezone_str = clinic_timezone  # Keep as string for Google Calendar
         self.clinic_timezone = pytz.timezone(clinic_timezone)
         self.reason_max_length = reason_max_length
 
     async def fetch_and_display_slots(
-        self, date_start: Optional[date] = None, date_end: Optional[date] = None, session: Optional[AsyncSession] = None
+        self,
+        date_start: Optional[date] = None,
+        date_end: Optional[date] = None,
+        session: Optional[AsyncSession] = None,
+        dentist_id: Optional[UUID] = None,
     ) -> tuple[list[AvailableSlot], str]:
         """Fetch available and booked slots and format for Telegram display.
 
@@ -71,12 +80,15 @@ class AppointmentService:
             date_start: Start date for slot search (default: today)
             date_end: End date for slot search (default: today + 7 days)
             session: Database session for fetching appointments
+            dentist_id: UUID of dentist (for multi-dentist support). If provided,
+                       filters appointments to this dentist's calendar only.
 
         Returns:
             (available_slots_only, formatted_message_text)
 
         Raises:
             GoogleCalendarError: If calendar fetch fails
+            DentistNotFoundError: If dentist_id provided but not found
         """
         # Set defaults
         today = datetime.now().date()
@@ -86,16 +98,24 @@ class AppointmentService:
             date_end = date_start + timedelta(days=7)
 
         try:
+            # Get calendar_id for dentist if specified
+            calendar_id = None
+            if dentist_id and self.dentist_service and session:
+                calendar_id = await self.dentist_service.get_dentist_calendar_id(session, dentist_id)
+
             # Fetch all appointments from database
             database_appointments = []
             if session:
-                stmt = select(Appointment).where(
-                    and_(
-                        Appointment.appointment_date >= date_start,
-                        Appointment.appointment_date <= date_end,
-                        Appointment.status == AppointmentStatusEnum.PENDING
-                    )
-                )
+                query_conditions = [
+                    Appointment.appointment_date >= date_start,
+                    Appointment.appointment_date <= date_end,
+                    Appointment.status == AppointmentStatusEnum.PENDING
+                ]
+                # Filter by dentist_id if provided (multi-dentist support)
+                if dentist_id:
+                    query_conditions.append(Appointment.dentist_id == dentist_id)
+
+                stmt = select(Appointment).where(and_(*query_conditions))
                 result = await session.execute(stmt)
                 db_appts = result.scalars().all()
                 database_appointments = [
@@ -114,6 +134,7 @@ class AppointmentService:
                 database_appointments=database_appointments,
                 business_hours=(time(8, 0), time(13, 0)),
                 timezone_str=self.clinic_timezone_str,
+                calendar_id=calendar_id,  # Pass specific calendar_id for multi-dentist
             )
 
             if not all_slots:
@@ -236,6 +257,7 @@ class AppointmentService:
         patient_user_id: int,
         selected_slot: AvailableSlot,
         reason: str,
+        dentist_id: Optional[UUID] = None,
         created_by_user_id: Optional[int] = None,
         created_by_phone: Optional[str] = None,
         session: Optional[AsyncSession] = None,
@@ -246,6 +268,7 @@ class AppointmentService:
             patient_user_id: Telegram user ID of patient
             selected_slot: Selected AvailableSlot object
             reason: Consultation reason (already validated)
+            dentist_id: UUID of dentist (required for multi-dentist support)
             created_by_user_id: Optional staff user ID who created appointment
             created_by_phone: Optional staff phone number
             session: Database session
@@ -255,12 +278,19 @@ class AppointmentService:
 
         Raises:
             SlotAlreadyBookedError: If slot was booked by another user (concurrent)
+            DentistNotFoundError: If dentist_id is provided but not found
             Exception: For other database errors
         """
         try:
+            # Validate dentist if provided
+            calendar_id = None
+            if dentist_id and self.dentist_service and session:
+                calendar_id = await self.dentist_service.get_dentist_calendar_id(session, dentist_id)
+
             # Create appointment record
             appointment = Appointment(
                 patient_user_id=patient_user_id,
+                dentist_id=dentist_id,
                 appointment_date=selected_slot.date,
                 start_time=selected_slot.start_time,
                 end_time=selected_slot.end_time,
@@ -292,6 +322,7 @@ class AppointmentService:
                     time_end=selected_slot.end_time,
                     description=f"Paciente: {patient_user_id}\nMotivo: {reason}",
                     timezone=self.clinic_timezone_str,
+                    calendar_id=calendar_id,  # Pass dentist's calendar_id if multi-dentist
                 )
                 event_id = google_event.get('id')
                 event_link = google_event.get('htmlLink', '')

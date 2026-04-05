@@ -23,6 +23,9 @@ class ConversationStateEnum(str, Enum):
     AWAITING_REASON_TEXT = "AWAITING_REASON_TEXT"  # User entering consultation reason
     APPOINTMENT_CONFIRMED = "APPOINTMENT_CONFIRMED"  # Appointment booking confirmed
 
+    # Feature 003: Multi-Dentist Booking
+    SELECTING_DENTIST = "SELECTING_DENTIST"  # User selecting which dentist to book with
+
     # Terminal states
     COMPLETED = "COMPLETED"
     INACTIVE = "INACTIVE"

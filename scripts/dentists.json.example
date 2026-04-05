@@ -1,0 +1,12 @@
+[
+    {
+        "name": "Hector",
+        "calendar_id": "hector@clinic.calendar.google.com",
+        "active_status": true
+    },
+    {
+        "name": "Fulano",
+        "calendar_id": "fulano@clinic.calendar.google.com",
+        "active_status": true
+    }
+]

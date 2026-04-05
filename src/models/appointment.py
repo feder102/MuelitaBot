@@ -6,6 +6,10 @@ from sqlalchemy import Column, String, Date, Time, DateTime, BigInteger, Foreign
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from src.db import Base
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.models.dentist import Dentist
 
 
 class AppointmentStatusEnum(str, Enum):
@@ -33,6 +37,12 @@ class Appointment(Base):
         UUID(as_uuid=True),
         ForeignKey("telegram_users.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+    dentist_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("dentists.id", ondelete="RESTRICT"),
+        nullable=True,
         index=True,
     )
     appointment_date = Column(Date, nullable=False, index=True)
@@ -64,6 +74,7 @@ class Appointment(Base):
     # Relationships
     patient = relationship("TelegramUser", foreign_keys=[patient_user_id], backref="appointments")
     created_by = relationship("TelegramUser", foreign_keys=[created_by_user_id])
+    dentist = relationship("Dentist", back_populates="appointments")
 
     # Constraints
     __table_args__ = (
@@ -77,5 +88,6 @@ class Appointment(Base):
     def __repr__(self) -> str:
         return (
             f"<Appointment(id={self.id}, patient_user_id={self.patient_user_id}, "
-            f"date={self.appointment_date}, time={self.start_time}, status={self.status})>"
+            f"dentist_id={self.dentist_id}, date={self.appointment_date}, "
+            f"time={self.start_time}, status={self.status})>"
         )

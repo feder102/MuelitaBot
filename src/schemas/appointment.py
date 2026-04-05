@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, date, time
 from enum import Enum
 from typing import Optional
+from uuid import UUID
 
 
 class AppointmentStatusEnum(str, Enum):
@@ -38,6 +39,7 @@ class AppointmentCreate(BaseModel):
     """Internal schema for creating appointment (after validation)."""
 
     patient_user_id: int
+    dentist_id: UUID
     appointment_date: date
     start_time: time
     reason: str
@@ -49,6 +51,7 @@ class AppointmentResponse(BaseModel):
     """Appointment details returned to user."""
 
     id: str
+    dentist_id: Optional[UUID] = None
     appointment_date: date
     start_time: time
     end_time: time
