@@ -78,7 +78,12 @@ class Appointment(Base):
 
     # Constraints
     __table_args__ = (
-        UniqueConstraint("appointment_date", "start_time", name="uq_appointment_slot"),
+        UniqueConstraint(
+            "dentist_id",
+            "appointment_date",
+            "start_time",
+            name="uq_appointment_slot_per_dentist",
+        ),
         CheckConstraint("char_length(reason) <= 150", name="ck_reason_length"),
         CheckConstraint(
             "end_time = start_time + INTERVAL '1 hour'", name="ck_appointment_duration"

@@ -100,8 +100,10 @@ class AppointmentService:
         try:
             # Get calendar_id for dentist if specified
             calendar_id = None
+            dentist = None
             if dentist_id and self.dentist_service and session:
-                calendar_id = await self.dentist_service.get_dentist_calendar_id(session, dentist_id)
+                dentist = await self.dentist_service.get_dentist_by_id(session, dentist_id)
+                calendar_id = dentist.calendar_id
 
             # Fetch all appointments from database
             database_appointments = []
@@ -137,15 +139,22 @@ class AppointmentService:
                 calendar_id=calendar_id,  # Pass specific calendar_id for multi-dentist
             )
 
+            no_slots_message = "No hay turnos disponibles en este momento. Contáctanos."
+            if dentist:
+                no_slots_message = (
+                    f"No hay turnos disponibles con {dentist.name} en este momento. "
+                    "Contáctanos."
+                )
+
             if not all_slots:
-                return [], "No hay turnos disponibles en este momento. Contáctanos."
+                return [], no_slots_message
 
             # Separate available and booked slots
             available_slots = [s for s in all_slots if not s['is_booked']]
             booked_slots = [s for s in all_slots if s['is_booked']]
 
             if not available_slots:
-                return [], "No hay turnos disponibles en este momento. Contáctanos."
+                return [], no_slots_message
 
             # Format available slots for selection (numbered 1, 2, 3...)
             display_slots = []
@@ -170,7 +179,10 @@ class AppointmentService:
                 display_slots.append(display_slot)
 
             # Format message for Telegram showing ALL slots (available + booked)
-            message = "Disponibilidad de turnos:\n"
+            if dentist:
+                message = f"Horarios disponibles con {dentist.name}:\n"
+            else:
+                message = "Disponibilidad de turnos:\n"
 
             # Show all slots in chronological order with status
             slot_counter = 1
@@ -284,8 +296,10 @@ class AppointmentService:
         try:
             # Validate dentist if provided
             calendar_id = None
+            dentist = None
             if dentist_id and self.dentist_service and session:
-                calendar_id = await self.dentist_service.get_dentist_calendar_id(session, dentist_id)
+                dentist = await self.dentist_service.get_dentist_by_id(session, dentist_id)
+                calendar_id = dentist.calendar_id
 
             # Create appointment record
             appointment = Appointment(
@@ -299,6 +313,8 @@ class AppointmentService:
                 created_by_phone=created_by_phone,
                 status=AppointmentStatusEnum.PENDING,
             )
+            if dentist:
+                appointment.dentist = dentist
 
             if session:
                 session.add(appointment)
@@ -308,36 +324,28 @@ class AppointmentService:
 
             # Create event in Google Calendar
             logger.info(f"🔗 About to create Google Calendar event...")
-            try:
-                logger.info(
-                    f"📅 Creating Google Calendar event: "
-                    f"date={selected_slot.date}, "
-                    f"time={selected_slot.start_time}-{selected_slot.end_time}, "
-                    f"reason={reason[:50]}"
-                )
-                google_event = await self.google_calendar_client.create_event(
-                    summary=f"Cita: {reason[:50]}",
-                    date_start=selected_slot.date,
-                    time_start=selected_slot.start_time,
-                    time_end=selected_slot.end_time,
-                    description=f"Paciente: {patient_user_id}\nMotivo: {reason}",
-                    timezone=self.clinic_timezone_str,
-                    calendar_id=calendar_id,  # Pass dentist's calendar_id if multi-dentist
-                )
-                event_id = google_event.get('id')
-                event_link = google_event.get('htmlLink', '')
-                logger.info(
-                    f"✅ Google Calendar event created successfully! "
-                    f"Event ID: {event_id}, "
-                    f"Link: {event_link}"
-                )
-            except Exception as e:
-                logger.error(
-                    f"❌ Failed to create Google Calendar event: {type(e).__name__}: {e}",
-                    exc_info=True
-                )
-                # Don't fail the booking if calendar creation fails
-
+            logger.info(
+                f"📅 Creating Google Calendar event: "
+                f"date={selected_slot.date}, "
+                f"time={selected_slot.start_time}-{selected_slot.end_time}, "
+                f"reason={reason[:50]}"
+            )
+            google_event = await self.google_calendar_client.create_event(
+                summary=f"Cita: {reason[:50]}",
+                date_start=selected_slot.date,
+                time_start=selected_slot.start_time,
+                time_end=selected_slot.end_time,
+                description=f"Paciente: {patient_user_id}\nMotivo: {reason}",
+                timezone=self.clinic_timezone_str,
+                calendar_id=calendar_id,  # Pass dentist's calendar_id if multi-dentist
+            )
+            event_id = google_event.get('id')
+            event_link = google_event.get('htmlLink', '')
+            logger.info(
+                f"✅ Google Calendar event created successfully! "
+                f"Event ID: {event_id}, "
+                f"Link: {event_link}"
+            )
             logger.info(
                 f"Booked appointment for user {patient_user_id} on "
                 f"{selected_slot.date} {selected_slot.start_time} (reason: {reason[:50]}...)"
@@ -350,12 +358,23 @@ class AppointmentService:
                 await session.rollback()
 
             # Handle UNIQUE constraint violation (concurrent booking)
-            if "uq_appointment_slot" in str(e):
+            if (
+                "uq_appointment_slot_per_dentist" in str(e)
+                or "uq_appointment_slot" in str(e)
+            ):
                 logger.warning(f"Concurrent booking detected for {selected_slot.start_time}")
                 raise SlotAlreadyBookedError(
                     f"Turno ya fue reservado. Elige otro:"
                 )
             # Re-raise for other constraint violations
+            raise
+        except GoogleCalendarError:
+            if session:
+                await session.rollback()
+            raise
+        except Exception:
+            if session:
+                await session.rollback()
             raise
 
     def format_confirmation(
@@ -376,12 +395,21 @@ class AppointmentService:
         # Format time range
         time_display = f"{appointment.start_time.strftime('%H:%M')}-{appointment.end_time.strftime('%H:%M')}"
 
-        message = (
-            f"✅ Tu turno ha sido confirmado:\n"
-            f"{date_display}, {time_display}\n"
-            f"Motivo: {appointment.reason}\n\n"
-            f"¿Deseas volver al menú principal?"
-        )
+        dentist_name = appointment.dentist.name if appointment.dentist else None
+        if dentist_name:
+            message = (
+                f"✅ Turno confirmado con {dentist_name}\n\n"
+                f"Fecha: {date_display}, {time_display}\n"
+                f"Motivo: {appointment.reason}\n\n"
+                f"¿Deseas volver al menú principal?"
+            )
+        else:
+            message = (
+                f"✅ Tu turno ha sido confirmado:\n"
+                f"{date_display}, {time_display}\n"
+                f"Motivo: {appointment.reason}\n\n"
+                f"¿Deseas volver al menú principal?"
+            )
 
         return message
 

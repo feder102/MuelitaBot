@@ -401,8 +401,8 @@ The system supports multiple dentists, each with their own Google Calendar for a
 
 ```
 Database (dentists table)
-    ├── Hector → ae78cb2baac...@group.calendar.google.com
-    └── Fulano → 763763f89...@group.calendar.google.com
+    ├── Hector → <hector_calendar_id@group.calendar.google.com>
+    └── Fulano → <fulano_calendar_id@group.calendar.google.com>
             ↓
 When booking appointment:
     └─→ Retrieved from DB → Passed to Google Calendar API
@@ -434,13 +434,13 @@ python3 scripts/seed_dentists.py "Dr. García" "garcia@clinic.calendar.google.co
 **Output:**
 ```
 ➕ Adding dentist: Hector
-✅ Created dentist: Hector (ID: cb631d65-b84a-4b5b-9bbb-79e21eaa2b8a)
+✅ Created dentist: Hector (ID: <generated_uuid>)
 ✅ Dentist seeded successfully
 ```
 
 **Current Dentists in System:**
-- ✅ **Hector** - `ae78cb2baac3e3318905a077b189140ef6226295e16f337fadb249caa483ea80@group.calendar.google.com`
-- ✅ **Fulano** - `763763f89e73f62085b6f2f9f0c6eebdd214fb2507dbaf88a5de70f32dd620c4@group.calendar.google.com`
+- ✅ **Hector** - `<hector_calendar_id@group.calendar.google.com>`
+- ✅ **Fulano** - `<fulano_calendar_id@group.calendar.google.com>`
 
 ### What Happens After Adding a Doctor
 
@@ -495,12 +495,12 @@ python3 scripts/test_multi_dentist_flow.py
 ```
 🦷 MULTI-DENTIST APPOINTMENT BOOKING FLOW TEST
 ✅ Found 2 active dentist(s)
-   1. Hector → ae78cb2ba...@group.calendar.google.com
-   2. Fulano → 763763f89...@group.calendar.google.com
+   1. Hector → <hector_calendar_id@group.calendar.google.com>
+   2. Fulano → <fulano_calendar_id@group.calendar.google.com>
 ✅ Retrieved 30 slot(s) for Hector
 ✅ Retrieved 30 slot(s) for Fulano
-✅ Hector's calendar ID: ae78cb2ba...@group.calendar.google.com (Matches stored value)
-✅ Fulano's calendar ID: 763763f89...@group.calendar.google.com (Matches stored value)
+✅ Hector's calendar ID: <hector_calendar_id@group.calendar.google.com> (Matches stored value)
+✅ Fulano's calendar ID: <fulano_calendar_id@group.calendar.google.com> (Matches stored value)
 ✨ The system is ready to handle multiple dentists!
 ```
 

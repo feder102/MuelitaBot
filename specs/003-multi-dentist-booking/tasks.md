@@ -48,7 +48,7 @@ Within each user story phase, the following can be done in parallel:
 
 ### Database Migration
 
-- [ ] T001 Create Alembic migration file `migrations/versions/[timestamp]_add_dentist_table.py` with:
+- [X] T001 Create Alembic migration file `migrations/versions/[timestamp]_add_dentist_table.py` with:
   - CREATE TABLE dentists (id, name, calendar_id, active_status, timestamps)
   - ADD COLUMN dentist_id to appointments (nullable initially)
   - CREATE indexes on dentist.active_status and appointment.dentist_id
@@ -70,7 +70,7 @@ These components are shared by all user stories and must be completed first.
 
 ### Database & Models
 
-- [ ] T003 [P] Create Dentist ORM model in `src/models/dentist.py`:
+- [X] T003 [P] Create Dentist ORM model in `src/models/dentist.py`:
   - Fields: id (UUID PK), name (unique string, 100 chars), calendar_id (unique string, 255 chars)
   - Fields: active_status (boolean, default True), created_at, updated_at (timestamps)
   - Indexes: idx_dentist_active_status, idx_dentist_name
@@ -78,7 +78,7 @@ These components are shared by all user stories and must be completed first.
   - Validation: name 1-100 chars, calendar_id non-empty
   - See [data-model.md](data-model.md) Entity 1 for details
 
-- [ ] T004 [P] Extend Appointment model in `src/models/appointment.py`:
+- [X] T004 [P] Extend Appointment model in `src/models/appointment.py`:
   - Add dentist_id column (UUID FK to dentists.id, nullable initially, indexed)
   - Update unique constraint from (appointment_date, start_time) to (dentist_id, appointment_date, start_time)
   - Add relationship: dentist = relationship("Dentist", back_populates="appointments")
@@ -87,20 +87,20 @@ These components are shared by all user stories and must be completed first.
 
 ### Schemas & Validation
 
-- [ ] T005 [P] Create Dentist Pydantic schemas in `src/schemas/dentist.py`:
+- [X] T005 [P] Create Dentist Pydantic schemas in `src/schemas/dentist.py`:
   - DentistResponse: id, name, calendar_id, active_status (read model)
   - DentistCreate: name, calendar_id, active_status=True (write model)
   - Both use Config.from_attributes = True for ORM compatibility
   - Validation: name 1-100 chars, calendar_id non-empty string
 
-- [ ] T006 [P] Extend Appointment schemas in `src/schemas/appointment.py`:
+- [X] T006 [P] Extend Appointment schemas in `src/schemas/appointment.py`:
   - Add dentist_id field to AppointmentCreate schema
   - Add dentist_id field to AppointmentResponse schema
   - Update AvailableSlot schema if needed to include dentist context
 
 ### Conversation State Extension
 
-- [ ] T007 Extend ConversationState handling in `src/services/conversation_manager.py`:
+- [X] T007 Extend ConversationState handling in `src/services/conversation_manager.py`:
   - Ensure set_step() and get_step() properly handle step_context JSON
   - Support new step: SELECTING_DENTIST
   - Support new context field: selected_dentist_id (stored in step_context JSON)
@@ -129,7 +129,7 @@ These components are shared by all user stories and must be completed first.
 
 ### DentistService Implementation
 
-- [ ] T008 Create DentistService in `src/services/dentist_service.py`:
+- [X] T008 Create DentistService in `src/services/dentist_service.py`:
   - Method: get_active_dentists(session) → List[Dentist]
     - SELECT * FROM dentists WHERE active_status = TRUE ORDER BY name
     - Returns list of active dentists for booking menu
@@ -144,7 +144,7 @@ These components are shared by all user stories and must be completed first.
 
 ### AppointmentService Extension
 
-- [ ] T009 Extend AppointmentService in `src/services/appointment_service.py`:
+- [X] T009 Extend AppointmentService in `src/services/appointment_service.py`:
   - Update __init__ to accept dentist_service parameter
   - Update get_available_slots(session, dentist_id) signature:
     - Add dentist_id parameter
@@ -160,7 +160,7 @@ These components are shared by all user stories and must be completed first.
 
 ### AppointmentRouter Dentist Selection Logic
 
-- [ ] T010 Extend AppointmentRouter in `src/services/appointment_router.py`:
+- [X] T010 Extend AppointmentRouter in `src/services/appointment_router.py`:
   - Add method: handle_appointment_selection(session, user_id, telegram_user) → str
     - Get active dentists: active_dentists = await dentist_service.get_active_dentists(session)
     - If 0 dentists: return error message "No dentists available. Contact secretary."
@@ -190,7 +190,7 @@ These components are shared by all user stories and must be completed first.
 
 ### Conversation State Transitions
 
-- [ ] T012 [US1] Update appointment_router message flow handling in `src/api/webhook.py`:
+- [X] T012 [US1] Update appointment_router message flow handling in `src/api/webhook.py`:
   - After user selects appointment (sends "1"):
     - Check current_step and call appropriate handler
     - If step == SELECTING_DENTIST and user sends number:
@@ -302,7 +302,7 @@ These components are shared by all user stories and must be completed first.
 
 ### Configuration & Initialization
 
-- [ ] T021 [US3] Create dentist seeding script `scripts/seed_dentists.py`:
+- [X] T021 [US3] Create dentist seeding script `scripts/seed_dentists.py`:
   - Script accepts dentist name and calendar_id as arguments
   - Inserts dentist into DB via SQLAlchemy
   - Usage: `python scripts/seed_dentists.py "Hector" "hector@clinic.calendar.google.com"`
@@ -311,7 +311,7 @@ These components are shared by all user stories and must be completed first.
 
 ### Configuration Documentation
 
-- [ ] T022 [P] [US3] Document dentist configuration in `README.md` and `SETUP.md`:
+- [X] T022 [P] [US3] Document dentist configuration in `README.md` and `SETUP.md`:
   - Section: "Managing Dentists"
   - How to add a new dentist (DB insert or script)
   - How to remove a dentist (soft delete via active_status flag)
@@ -339,7 +339,7 @@ These components are shared by all user stories and must be completed first.
 
 ### Documentation & Quality
 
-- [ ] T025 Update API documentation and inline comments:
+- [X] T025 Update API documentation and inline comments:
   - Add docstrings to new services: DentistService, extend AppointmentService
   - Add docstrings to new models: Dentist, extend Appointment
   - Add docstrings to new schemas: DentistCreate, DentistResponse

@@ -22,6 +22,11 @@ logger = get_logger(__name__)
 class AppointmentRouter:
     """Route and handle appointment booking state transitions."""
 
+    @staticmethod
+    def _serialize_slots(slots: list[AvailableSlot]) -> list[dict]:
+        """Serialize slots for JSON storage in conversation context."""
+        return [slot.model_dump(mode="json") for slot in slots]
+
     def __init__(self):
         """Initialize appointment router with services."""
         try:
@@ -55,7 +60,11 @@ class AppointmentRouter:
             self.appointment_service = None
             self.dentist_service = None
 
-    async def fetch_and_show_slots(self, session: AsyncSession = None) -> tuple[ConversationStateEnum, str, list[AvailableSlot]]:
+    async def fetch_and_show_slots(
+        self,
+        session: AsyncSession = None,
+        dentist_id: UUID | None = None,
+    ) -> tuple[ConversationStateEnum, str, list[AvailableSlot]]:
         """Fetch available slots and format for user display.
 
         Called when user selects "1" (Solicitar turno).
@@ -83,7 +92,10 @@ class AppointmentRouter:
             logger.info(f"📅 Fetching slots from {tomorrow} to {next_week}")
 
             slots, message = await self.appointment_service.fetch_and_display_slots(
-                date_start=tomorrow, date_end=next_week, session=session
+                date_start=tomorrow,
+                date_end=next_week,
+                session=session,
+                dentist_id=dentist_id,
             )
             logger.info(f"✅ Got {len(slots)} slots from service")
 
@@ -114,7 +126,11 @@ class AppointmentRouter:
             )
 
     async def validate_slot_selection(
-        self, user_input: str, available_slots: list[AvailableSlot]
+        self,
+        user_input: str,
+        available_slots: list[AvailableSlot],
+        session: AsyncSession | None = None,
+        dentist_id: UUID | None = None,
     ) -> tuple[ConversationStateEnum, str, AvailableSlot | None]:
         """Validate user's slot selection.
 
@@ -132,7 +148,10 @@ class AppointmentRouter:
 
         except InvalidSlotError as e:
             # Invalid selection; re-show slots
-            _, slots_message, _ = await self.fetch_and_show_slots()
+            _, slots_message, _ = await self.fetch_and_show_slots(
+                session=session,
+                dentist_id=dentist_id,
+            )
             message = f"{str(e)}\n\n{slots_message}"
             return (ConversationStateEnum.AWAITING_SLOT_SELECTION, message, None)
 
@@ -199,9 +218,20 @@ class AppointmentRouter:
         except SlotAlreadyBookedError as e:
             # Concurrent booking; fetch fresh slots
             logger.warning(f"🔄 Slot already booked, fetching fresh slots: {e}")
-            _, slots_message, _ = await self.fetch_and_show_slots()
+            _, slots_message, _ = await self.fetch_and_show_slots(
+                session=session,
+                dentist_id=dentist_id,
+            )
             message = f"{str(e)}\n\n{slots_message}"
             return (ConversationStateEnum.AWAITING_SLOT_SELECTION, message)
+
+        except GoogleCalendarError as e:
+            logger.warning(f"⚠️ Google Calendar error booking appointment: {e}")
+            message = (
+                "No pudimos registrar el turno en el calendario del odontólogo. "
+                "Intenta de nuevo o contacta a la secretaria."
+            )
+            return (ConversationStateEnum.AWAITING_MENU, message)
 
         except Exception as e:
             logger.error(
@@ -273,8 +303,16 @@ class AppointmentRouter:
                         {},
                     )
 
-                context_data = {"selected_dentist_id": str(dentist.id)}
-                return (ConversationStateEnum.AWAITING_SLOT_SELECTION, message, context_data)
+                context_data = {
+                    "selected_dentist_id": str(dentist.id),
+                    "available_slots": self._serialize_slots(slots),
+                }
+                response_message = f"Buscando horarios disponibles con {dentist.name}...\n\n{message}"
+                return (
+                    ConversationStateEnum.AWAITING_SLOT_SELECTION,
+                    response_message,
+                    context_data,
+                )
 
             # Multiple dentists - show selection menu
             logger.info(f"📋 Showing dentist selection menu for {len(dentists)} dentists")
@@ -354,10 +392,28 @@ class AppointmentRouter:
                 dentist = await self.dentist_service.get_dentist_by_id(session, UUID(selected_dentist_id))
             except DentistNotFoundError:
                 logger.warning(f"⚠️ Selected dentist no longer available: {selected_dentist_id}")
+                refreshed_dentists = await self.dentist_service.get_active_dentists(session)
+                if not refreshed_dentists:
+                    return (
+                        ConversationStateEnum.AWAITING_MENU,
+                        "Lo sentimos, no hay doctores disponibles en este momento.\n"
+                        "Por favor, contacta a nuestra secretaria para más información.",
+                        {},
+                    )
+
+                refreshed_list = "\n".join(
+                    f"{i + 1}. {d.name}" for i, d in enumerate(refreshed_dentists)
+                )
+                refreshed_context = {
+                    "available_dentists": [str(d.id) for d in refreshed_dentists],
+                    "dentist_names": {str(d.id): d.name for d in refreshed_dentists},
+                }
                 return (
-                    ConversationStateEnum.AWAITING_MENU,
-                    f"El odontólogo seleccionado ya no está disponible.\nPor favor, intenta de nuevo.",
-                    {},
+                    ConversationStateEnum.SELECTING_DENTIST,
+                    "El odontólogo seleccionado ya no está disponible.\n\n"
+                    "Por favor, selecciona otro odontólogo.\n\n"
+                    f"{refreshed_list}",
+                    refreshed_context,
                 )
 
             # Fetch and show slots for selected dentist
@@ -379,8 +435,18 @@ class AppointmentRouter:
                     {},
                 )
 
-            context_data = {"selected_dentist_id": selected_dentist_id}
-            return (ConversationStateEnum.AWAITING_SLOT_SELECTION, message, context_data)
+            context_data = {
+                "selected_dentist_id": selected_dentist_id,
+                "available_slots": self._serialize_slots(slots),
+            }
+            response_message = (
+                f"Buscando horarios disponibles con {selected_dentist_name}...\n\n{message}"
+            )
+            return (
+                ConversationStateEnum.AWAITING_SLOT_SELECTION,
+                response_message,
+                context_data,
+            )
 
         except Exception as e:
             logger.error(
