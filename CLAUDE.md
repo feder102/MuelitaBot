@@ -35,12 +35,12 @@ Python 3.11+: Follow standard conventions
 ## Multi-Dentist Support - ✅ FULLY OPERATIONAL
 
 ### Current Dentists in System
-- **Hector** (ID: cb631d65-b84a-4b5b-9bbb-79e21eaa2b8a)
-  - Calendar: `ae78cb2baac3e3318905a077b189140ef6226295e16f337fadb249caa483ea80@group.calendar.google.com`
+- **Hector** (ID: `<hector_dentist_uuid>`)
+  - Calendar: `<hector_calendar_id@group.calendar.google.com>`
   - Status: Active ✅
 
-- **Fulano** (ID: 2a37ade0-aebe-466a-8b26-989107dd31a0)
-  - Calendar: `763763f89e73f62085b6f2f9f0c6eebdd214fb2507dbaf88a5de70f32dd620c4@group.calendar.google.com`
+- **Fulano** (ID: `<fulano_dentist_uuid>`)
+  - Calendar: `<fulano_calendar_id@group.calendar.google.com>`
   - Status: Active ✅
 
 ### How It Works

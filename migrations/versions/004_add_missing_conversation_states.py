@@ -7,7 +7,6 @@ Feature 002 (Appointment Booking) and Feature 003 (Multi-Dentist) added new stat
 that were missing from the initial enum definition.
 """
 from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers
 revision = '004'
@@ -19,10 +18,14 @@ depends_on = None
 def upgrade() -> None:
     """Add missing SELECTING_DENTIST state to conversation_state enum.
 
-    Note: The enum is named 'conversationstateenum' (lowercase) in the database.
+    Note: The enum created by the initial schema migration is
+    'conversation_state_enum' in the database.
     """
     # Add SELECTING_DENTIST state for Feature 003 (Multi-Dentist Booking)
-    op.execute("ALTER TYPE conversationstateenum ADD VALUE 'SELECTING_DENTIST'")
+    op.execute(
+        "ALTER TYPE conversation_state_enum "
+        "ADD VALUE IF NOT EXISTS 'SELECTING_DENTIST'"
+    )
 
 
 def downgrade() -> None:
