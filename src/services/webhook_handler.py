@@ -1,5 +1,6 @@
 """Webhook processing and orchestration service."""
 import logging
+from datetime import date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.audit_log import AuditLog, AuditActionEnum, AuditStatusEnum
@@ -147,11 +148,19 @@ class WebhookHandler:
                     selected_slot = AvailableSlot(**selected_slot_data)
                     logger.info(f"📅 Reconstructed slot: {selected_slot.date} {selected_slot.start_time}-{selected_slot.end_time}")
 
+                    # Get dentist_id for multi-dentist support
+                    dentist_id = None
+                    if state.context_data and "selected_dentist_id" in state.context_data:
+                        from uuid import UUID
+                        dentist_id = UUID(state.context_data["selected_dentist_id"])
+                        logger.info(f"🦷 Multi-dentist booking with dentist_id={dentist_id}")
+
                     logger.info(f"🔄 Calling validate_and_book_appointment with reason: '{message_text[:50]}'")
                     new_state, response_message = await self.appointment_router.validate_and_book_appointment(
                         user_input=message_text,
                         patient_user_id=user.id,
                         selected_slot=selected_slot,
+                        dentist_id=dentist_id,  # Multi-dentist support
                         session=self.session,
                     )
                     logger.info(f"✅ Booking result: new_state={new_state}, message preview={response_message[:50]}")
@@ -182,17 +191,80 @@ class WebhookHandler:
                     ip_address=ip_address,
                 )
 
+            elif state.current_state == ConversationStateEnum.SELECTING_DENTIST:
+                # User is selecting which dentist to book with
+                logger.info(f"🦷 SELECTING_DENTIST: Processing dentist selection from user {user.id}")
+                available_dentist_ids = state.context_data.get("available_dentists", []) if state.context_data else []
+                dentist_names = state.context_data.get("dentist_names", {}) if state.context_data else {}
+
+                logger.info(f"📋 Available dentists: {available_dentist_ids}")
+
+                new_state, response_message, context_data = await self.appointment_router.handle_dentist_selected(
+                    session=self.session,
+                    user_input=message_text,
+                    available_dentist_ids=available_dentist_ids,
+                    dentist_names=dentist_names,
+                )
+
+                logger.info(f"✅ Dentist selection result: new_state={new_state}")
+
+                update_metadata = {}
+                if context_data and "selected_dentist_id" in context_data:
+                    update_metadata["selected_dentist_id"] = context_data["selected_dentist_id"]
+
+                await self.conversation_manager.update_state(
+                    self.session,
+                    user.id,
+                    new_state,
+                    update_metadata=update_metadata,
+                )
+
+                await self._log_audit(
+                    user_id=user.id,
+                    action=AuditActionEnum.MENU_SELECTION_MADE,
+                    status=AuditStatusEnum.SUCCESS,
+                    message_text=message_text[:50],
+                    response_text=response_message[:100],
+                    ip_address=ip_address,
+                )
+
             elif state.current_state.value in ["APPOINTMENT_SELECTED", "SECRETARY_SELECTED", "COMPLETED"]:
                 # Legacy states - redirect to menu or handle
                 if state.current_state.value == "APPOINTMENT_SELECTED":
-                    # User selected appointment; fetch slots
-                    new_state, response_message, available_slots = await self.appointment_router.fetch_and_show_slots(session=self.session)
+                    # User selected appointment; check for multi-dentist support
+                    new_state, response_message, context_data = await self.appointment_router.handle_appointment_request(session=self.session)
+
+                    update_metadata = {}
+                    if context_data:
+                        if "selected_dentist_id" in context_data:
+                            update_metadata["selected_dentist_id"] = context_data["selected_dentist_id"]
+                        if "available_dentists" in context_data:
+                            update_metadata["available_dentists"] = context_data["available_dentists"]
+                            update_metadata["dentist_names"] = context_data.get("dentist_names", {})
+
+                    # For backward compatibility, if dentist selection returns slots, also store them
+                    if new_state == ConversationStateEnum.AWAITING_SLOT_SELECTION:
+                        # Get available slots
+                        dentist_id = None
+                        if "selected_dentist_id" in context_data:
+                            from uuid import UUID
+                            dentist_id = UUID(context_data["selected_dentist_id"])
+
+                        tomorrow = date.today() + timedelta(days=1)
+                        next_week = tomorrow + timedelta(days=7)
+                        slots, _ = await self.appointment_router.appointment_service.fetch_and_display_slots(
+                            date_start=tomorrow,
+                            date_end=next_week,
+                            session=self.session,
+                            dentist_id=dentist_id,
+                        )
+                        update_metadata["available_slots"] = [slot.dict() for slot in slots]
 
                     await self.conversation_manager.update_state(
                         self.session,
                         user.id,
                         new_state,
-                        update_metadata={"available_slots": [slot.dict() for slot in available_slots]},
+                        update_metadata=update_metadata,
                     )
 
                     await self._log_audit(
@@ -219,6 +291,54 @@ class WebhookHandler:
 
                     logger.info(f"🎯 Menu selection: selection={selection}, new_state={new_state}, new_state.value={new_state.value if new_state else None}")
 
+                    # Handle appointment selection immediately without waiting for next message
+                    if new_state == ConversationStateEnum.APPOINTMENT_SELECTED:
+                        logger.info(f"🚀 Auto-processing APPOINTMENT_SELECTED immediately...")
+                        logger.info(f"   appointment_router: {self.appointment_router}")
+                        logger.info(f"   appointment_router.dentist_service: {self.appointment_router.dentist_service if self.appointment_router else 'N/A'}")
+                        new_state, response_message, context_data = await self.appointment_router.handle_appointment_request(session=self.session)
+                        logger.info(f"   ✅ handle_appointment_request() returned: new_state={new_state}, context_data keys={context_data.keys() if context_data else None}")
+
+                        update_metadata = {}
+                        if context_data:
+                            if "selected_dentist_id" in context_data:
+                                update_metadata["selected_dentist_id"] = context_data["selected_dentist_id"]
+                            if "available_dentists" in context_data:
+                                update_metadata["available_dentists"] = context_data["available_dentists"]
+                                update_metadata["dentist_names"] = context_data.get("dentist_names", {})
+
+                        # If single dentist auto-selected, fetch and store available slots
+                        if new_state == ConversationStateEnum.AWAITING_SLOT_SELECTION:
+                            dentist_id = None
+                            if "selected_dentist_id" in context_data:
+                                from uuid import UUID
+                                dentist_id = UUID(context_data["selected_dentist_id"])
+
+                            tomorrow = date.today() + timedelta(days=1)
+                            next_week = tomorrow + timedelta(days=7)
+                            slots, _ = await self.appointment_router.appointment_service.fetch_and_display_slots(
+                                date_start=tomorrow,
+                                date_end=next_week,
+                                session=self.session,
+                                dentist_id=dentist_id,
+                            )
+                            update_metadata["available_slots"] = [slot.dict() for slot in slots]
+
+                        logger.info(f"   Calling update_state with new_state={new_state}, update_metadata={update_metadata.keys() if update_metadata else {}}")
+                        await self.conversation_manager.update_state(
+                            self.session,
+                            user.id,
+                            new_state,
+                            update_metadata=update_metadata,
+                        )
+
+                        logger.info(f"✅ APPOINTMENT_SELECTED processed, new_state={new_state}, final response_message={response_message[:60]}...")
+                    else:
+                        # For other selections (Secretary, etc.), just update state
+                        await self.conversation_manager.update_state(
+                            self.session, user.id, new_state
+                        )
+
                     await self._log_audit(
                         user_id=user.id,
                         action=AuditActionEnum.MENU_SELECTION_MADE,
@@ -227,50 +347,6 @@ class WebhookHandler:
                         response_text=response_message[:100],
                         ip_address=ip_address,
                     )
-
-                    # For appointment selection, fetch slots immediately
-                    if new_state and new_state.value == "APPOINTMENT_SELECTED":
-                        if not self.appointment_router:
-                            logger.error(f"❌ appointment_router is None - cannot fetch slots!")
-                            response_message = "Sistema de turnos no disponible. Contacta a la secretaria."
-                            available_slots = []
-                        else:
-                            new_state, response_message, available_slots = await self.appointment_router.fetch_and_show_slots(session=self.session)
-
-                        logger.info(f"🎯 Fetched {len(available_slots)} slots for user {user.id}")
-
-                        await self.conversation_manager.update_state(
-                            self.session,
-                            user.id,
-                            new_state,
-                            update_metadata={"available_slots": [slot.model_dump(mode='json') for slot in available_slots]},
-                        )
-
-                        logger.info(f"💾 Saved {len(available_slots)} slots to context_data for state {new_state}")
-
-                        await self._log_audit(
-                            user_id=user.id,
-                            action=AuditActionEnum.APPOINTMENT_ROUTED,
-                            status=AuditStatusEnum.SUCCESS,
-                            response_text=response_message[:100],
-                            ip_address=ip_address,
-                        )
-                    elif new_state:
-                        await self.conversation_manager.update_state(
-                            self.session,
-                            user.id,
-                            new_state,
-                        )
-
-                        # Log routing decision
-                        action = AuditActionEnum.SECRETARY_ROUTED if new_state.value == "SECRETARY_SELECTED" else AuditActionEnum.APPOINTMENT_ROUTED
-                        await self._log_audit(
-                            user_id=user.id,
-                            action=action,
-                            status=AuditStatusEnum.SUCCESS,
-                            message_text=selection,
-                            ip_address=ip_address,
-                        )
                 else:
                     # No selection; display or re-display menu
                     await self.conversation_manager.increment_menu_display_count(
@@ -300,6 +376,7 @@ class WebhookHandler:
                         )
 
             # Send response via Telegram API
+            logger.info(f"📨 Sending message to user {user_id}: {response_message[:100]}...")
             await self.telegram_client.send_message(user_id, response_message)
 
             # Commit changes
