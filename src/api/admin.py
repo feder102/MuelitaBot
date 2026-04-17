@@ -4,14 +4,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.api.webhook import get_session
 from src.config import settings
+from src.db import get_db
 from src.models.admin_user import AdminUser
 from src.models.appointment import Appointment, AppointmentStatusEnum
 from src.models.dentist import Dentist
@@ -52,12 +52,22 @@ def record_failed_attempt(ip: str):
             failed_attempts[ip] = [attempts + 1, now + timedelta(minutes=15)]
 
 
+async def get_current_admin(
+    session: AsyncSession = Depends(get_db),
+    session_cookie: Optional[str] = Cookie(None, alias="session"),
+) -> AdminUser:
+    """Dependency to get current admin from session cookie."""
+    if not session_cookie:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No session")
+    return await AdminAuthService.get_current_admin(session, session_cookie)
+
+
 # Auth endpoints
 @router.post("/auth/login")
 async def login(
     request: Request,
     credentials: dict,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db),
 ):
     """Login with username/password."""
     ip = request.client.host if request.client else "unknown"
@@ -89,7 +99,7 @@ async def login(
         "session",
         token,
         httponly=True,
-        samesite="strict",
+        samesite="lax",
         max_age=settings.admin_jwt_expire_minutes * 60,
         secure=not settings.is_development,
     )
@@ -106,15 +116,9 @@ async def logout():
 
 @router.get("/auth/me")
 async def get_me(
-    session: AsyncSession = Depends(get_session),
-    token: Optional[str] = Depends(lambda: None),
+    admin: AdminUser = Depends(get_current_admin),
 ):
     """Get current admin."""
-    # Extract token from cookie
-    if not token:
-        raise HTTPException(status_code=401)
-
-    admin = await AdminAuthService.get_current_admin(session, token)
     return {"username": admin.username, "id": str(admin.id)}
 
 
@@ -124,7 +128,7 @@ async def list_appointments(
     status: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db),
 ):
     """List appointments with pagination."""
     stmt = select(Appointment).options(
@@ -169,7 +173,7 @@ async def list_appointments(
 
 
 @router.get("/appointments/{id}")
-async def get_appointment(id: str, session: AsyncSession = Depends(get_session)):
+async def get_appointment(id: str, session: AsyncSession = Depends(get_db)):
     """Get single appointment."""
     stmt = select(Appointment).where(Appointment.id == UUID(id)).options(
         selectinload(Appointment.patient),
@@ -196,8 +200,8 @@ async def get_appointment(id: str, session: AsyncSession = Depends(get_session))
 @router.patch("/appointments/{id}/cancel")
 async def cancel_appointment(
     id: str,
-    session: AsyncSession = Depends(get_session),
-    admin: AdminUser = Depends(AdminAuthService.get_current_admin),
+    session: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
 ):
     """Cancel appointment."""
     stmt = select(Appointment).where(Appointment.id == UUID(id))
@@ -229,8 +233,8 @@ async def cancel_appointment(
 @router.delete("/appointments/{id}")
 async def delete_appointment(
     id: str,
-    session: AsyncSession = Depends(get_session),
-    admin: AdminUser = Depends(AdminAuthService.get_current_admin),
+    session: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
 ):
     """Delete appointment."""
     stmt = select(Appointment).where(Appointment.id == UUID(id))
@@ -259,7 +263,7 @@ async def delete_appointment(
 
 # Dentists
 @router.get("/dentists")
-async def list_dentists(session: AsyncSession = Depends(get_session)):
+async def list_dentists(session: AsyncSession = Depends(get_db)):
     """List dentists."""
     stmt = select(Dentist).order_by(Dentist.name)
     result = await session.execute(stmt)
@@ -282,8 +286,8 @@ async def list_dentists(session: AsyncSession = Depends(get_session)):
 @router.post("/dentists")
 async def create_dentist(
     data: dict,
-    session: AsyncSession = Depends(get_session),
-    admin: AdminUser = Depends(AdminAuthService.get_current_admin),
+    session: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
 ):
     """Create dentist."""
     name = data.get("name")
@@ -322,8 +326,8 @@ async def create_dentist(
 async def update_dentist(
     id: str,
     data: dict,
-    session: AsyncSession = Depends(get_session),
-    admin: AdminUser = Depends(AdminAuthService.get_current_admin),
+    session: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
 ):
     """Update dentist."""
     stmt = select(Dentist).where(Dentist.id == UUID(id))
@@ -359,7 +363,7 @@ async def update_dentist(
 async def list_patients(
     page: int = 1,
     page_size: int = 50,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db),
 ):
     """List patients."""
     stmt = select(TelegramUser).order_by(TelegramUser.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
@@ -389,7 +393,7 @@ async def list_patients(
 
 
 @router.get("/patients/{id}")
-async def get_patient(id: str, session: AsyncSession = Depends(get_session)):
+async def get_patient(id: str, session: AsyncSession = Depends(get_db)):
     """Get patient with appointments."""
     stmt = select(TelegramUser).where(TelegramUser.id == UUID(id)).options(
         selectinload(TelegramUser.appointments)

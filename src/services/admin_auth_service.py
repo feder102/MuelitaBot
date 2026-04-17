@@ -72,11 +72,3 @@ class AdminAuthService:
         return admin
 
 
-# FastAPI dependency
-async def get_current_admin(
-    token: Optional[str] = None, session: AsyncSession = Depends(...)
-) -> AdminUser:
-    """FastAPI dependency to get current admin from JWT cookie or header."""
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-    return await AdminAuthService.get_current_admin(session, token)
