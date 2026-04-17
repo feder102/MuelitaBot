@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.config import settings
 from src.utils.logger import setup_logging
 from src.api.webhook import router as webhook_router
+from src.api.admin import router as admin_router
 from src.db import engine, Base
 from src.models import *  # noqa: F401, F403 - Registers all models with Base
 
@@ -51,6 +52,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(webhook_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

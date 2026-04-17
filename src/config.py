@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     appointment_slots_end_time: str = "13:00"
     appointment_reason_max_length: int = 150
 
+    # Admin Dashboard Configuration (Feature 005)
+    admin_jwt_secret: str = ""
+    admin_jwt_expire_minutes: int = 60
+
     class Config:
         env_file = ".env"
         case_sensitive = False
