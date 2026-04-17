@@ -1,12 +1,13 @@
 # turnoHector Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-04-05
+Auto-generated from all feature plans. Last updated: 2026-04-12
 
 ## Active Technologies
 - Python 3.11+ + FastAPI, SQLAlchemy (async ORM), google-auth, google-api-python-client, python-telegram-bot (002-appointment-booking)
 - PostgreSQL (extends existing schema with Appointment table) (002-appointment-booking)
 - Python 3.11+ + FastAPI, SQLAlchemy (async ORM), google-api-python-client, python-telegram-bot, Pydantic (003-multi-dentist-booking)
 - PostgreSQL (async via asyncpg) (003-multi-dentist-booking)
+- Python 3.11+ + FastAPI (async), SQLAlchemy (async ORM), python-telegram-bot (webhook mode), google-api-python-client, Alembic (004-cancel-appointment)
 
 - Python 3.11+ + FastAPI, python-telegram-bot (or async Telegram API client), SQLAlchemy ORM, pydantic (001-webhook-menu)
 
@@ -27,10 +28,10 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 004-cancel-appointment: Added Python 3.11+ + FastAPI (async), SQLAlchemy (async ORM), python-telegram-bot (webhook mode), google-api-python-client, Alembic
 - 003-multi-dentist-booking: Added Python 3.11+ + FastAPI, SQLAlchemy (async ORM), google-api-python-client, python-telegram-bot, Pydantic
 - 002-appointment-booking: Added Python 3.11+ + FastAPI, SQLAlchemy (async ORM), google-auth, google-api-python-client, python-telegram-bot
 
-- 001-webhook-menu: Added Python 3.11+ + FastAPI, python-telegram-bot (or async Telegram API client), SQLAlchemy ORM, pydantic
 
 ## Multi-Dentist Support - ✅ FULLY OPERATIONAL
 

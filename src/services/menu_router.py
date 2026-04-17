@@ -15,7 +15,8 @@ class MenuRouter:
 
 Selecciona una opción:
 1️⃣ Solicitar turno
-2️⃣ Hablar con secretaria"""
+2️⃣ Hablar con secretaria
+3️⃣ Cancelar turno"""
 
     APPOINTMENT_SELECTED_MESSAGE = """Entendido. Solicitar turno 📅
 
@@ -29,7 +30,8 @@ Un momento por favor..."""
 
 Selecciona una opción:
 1️⃣ Solicitar turno
-2️⃣ Hablar con secretaria"""
+2️⃣ Hablar con secretaria
+3️⃣ Cancelar turno"""
 
     @staticmethod
     def get_menu_message() -> str:

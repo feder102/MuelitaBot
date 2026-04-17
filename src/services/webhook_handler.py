@@ -11,6 +11,7 @@ from src.services.message_parser import MessageParser
 from src.services.conversation_manager import ConversationManager
 from src.services.menu_router import MenuRouter
 from src.services.appointment_router import AppointmentRouter
+from src.services.cancellation_router import CancellationRouter
 from src.utils.telegram_client import TelegramClient
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,14 @@ class WebhookHandler:
         except Exception as e:
             logger.error(f"❌ Failed to initialize AppointmentRouter: {type(e).__name__}: {e}", exc_info=True)
             self.appointment_router = None
+
+        try:
+            logger.info(f"🚀 Initializing CancellationRouter in WebhookHandler...")
+            self.cancellation_router = CancellationRouter()
+            logger.info(f"✅ CancellationRouter initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize CancellationRouter: {type(e).__name__}: {e}", exc_info=True)
+            self.cancellation_router = None
 
     def _get_selected_dentist_id(self, context_data: dict | None, user_id) -> UUID | None:
         """Parse selected dentist id from conversation context."""
@@ -259,6 +268,52 @@ class WebhookHandler:
                     ip_address=ip_address,
                 )
 
+            elif state.current_state == ConversationStateEnum.SELECTING_CANCELLATION_APPOINTMENT:
+                # User is viewing their cancellable appointment list and selecting one
+                logger.info(f"🗑️ SELECTING_CANCELLATION_APPOINTMENT: Processing selection from user {user.id}")
+                new_state, response_message, context_update = await self.cancellation_router.validate_appointment_selection(
+                    user_input=message_text,
+                    context_data=state.context_data or {},
+                )
+                update_metadata = context_update if context_update else None
+                await self.conversation_manager.update_state(
+                    self.session, user.id, new_state, update_metadata=update_metadata
+                )
+                await self._log_audit(
+                    user_id=user.id,
+                    action=AuditActionEnum.MENU_SELECTION_MADE,
+                    status=AuditStatusEnum.SUCCESS,
+                    message_text=message_text[:50] if message_text else None,
+                    response_text=response_message[:100],
+                    ip_address=ip_address,
+                )
+
+            elif state.current_state == ConversationStateEnum.AWAITING_CANCELLATION_CONFIRMATION:
+                # User is confirming or aborting cancellation
+                logger.info(f"🗑️ AWAITING_CANCELLATION_CONFIRMATION: Processing confirmation from user {user.id}")
+                confirmation = self.message_parser.extract_cancellation_confirmation(message_text)
+                # If confirmation is None (unexpected input), pass it through; router will re-prompt
+                effective_confirmation = confirmation if confirmation else (message_text or "")
+                new_state, response_message = await self.cancellation_router.confirm_and_cancel_appointment(
+                    session=self.session,
+                    user=user,
+                    confirmation=effective_confirmation,
+                    context_data=state.context_data or {},
+                )
+                await self.conversation_manager.update_state(
+                    self.session, user.id, new_state
+                )
+                await self._log_audit(
+                    user_id=user.id,
+                    action=AuditActionEnum.APPOINTMENT_CANCELLED
+                    if new_state == ConversationStateEnum.AWAITING_MENU and effective_confirmation == "si"
+                    else AuditActionEnum.MENU_SELECTION_MADE,
+                    status=AuditStatusEnum.SUCCESS,
+                    message_text=message_text[:50] if message_text else None,
+                    response_text=response_message[:100],
+                    ip_address=ip_address,
+                )
+
             elif state.current_state == ConversationStateEnum.SELECTING_DENTIST:
                 # User is selecting which dentist to book with
                 logger.info(f"🦷 SELECTING_DENTIST: Processing dentist selection from user {user.id}")
@@ -343,52 +398,71 @@ class WebhookHandler:
                 selection = self.message_parser.extract_menu_selection(message_text)
 
                 if selection:
-                    # Menu selection detected
-                    new_state, response_message = self.menu_router.route_selection(selection)
-
-                    logger.info(f"🎯 Menu selection: selection={selection}, new_state={new_state}, new_state.value={new_state.value if new_state else None}")
-
-                    # Handle appointment selection immediately without waiting for next message
-                    if new_state == ConversationStateEnum.APPOINTMENT_SELECTED:
-                        logger.info(f"🚀 Auto-processing APPOINTMENT_SELECTED immediately...")
-                        logger.info(f"   appointment_router: {self.appointment_router}")
-                        logger.info(f"   appointment_router.dentist_service: {self.appointment_router.dentist_service if self.appointment_router else 'N/A'}")
-                        new_state, response_message, context_data = await self.appointment_router.handle_appointment_request(session=self.session)
-                        logger.info(f"   ✅ handle_appointment_request() returned: new_state={new_state}, context_data keys={context_data.keys() if context_data else None}")
-
-                        update_metadata = {}
-                        if context_data:
-                            if "selected_dentist_id" in context_data:
-                                update_metadata["selected_dentist_id"] = context_data["selected_dentist_id"]
-                            if "available_dentists" in context_data:
-                                update_metadata["available_dentists"] = context_data["available_dentists"]
-                                update_metadata["dentist_names"] = context_data.get("dentist_names", {})
-                            if "available_slots" in context_data:
-                                update_metadata["available_slots"] = context_data["available_slots"]
-
-                        logger.info(f"   Calling update_state with new_state={new_state}, update_metadata={update_metadata.keys() if update_metadata else {}}")
-                        await self.conversation_manager.update_state(
-                            self.session,
-                            user.id,
-                            new_state,
-                            update_metadata=update_metadata,
+                    # Option 3: Cancel appointment — handle directly, no intermediate state needed
+                    if selection == "3":
+                        logger.info(f"🗑️ Menu selection: 3 (cancel appointment) for user {user.id}")
+                        new_state, response_message, context_data = await self.cancellation_router.handle_cancellation_request(
+                            session=self.session, user=user
                         )
-
-                        logger.info(f"✅ APPOINTMENT_SELECTED processed, new_state={new_state}, final response_message={response_message[:60]}...")
+                        update_metadata = context_data if context_data else None
+                        await self.conversation_manager.update_state(
+                            self.session, user.id, new_state, update_metadata=update_metadata
+                        )
+                        await self._log_audit(
+                            user_id=user.id,
+                            action=AuditActionEnum.MENU_SELECTION_MADE,
+                            status=AuditStatusEnum.SUCCESS,
+                            message_text=selection,
+                            response_text=response_message[:100],
+                            ip_address=ip_address,
+                        )
                     else:
-                        # For other selections (Secretary, etc.), just update state
-                        await self.conversation_manager.update_state(
-                            self.session, user.id, new_state
-                        )
+                        # Menu selection detected (options 1, 2)
+                        new_state, response_message = self.menu_router.route_selection(selection)
 
-                    await self._log_audit(
-                        user_id=user.id,
-                        action=AuditActionEnum.MENU_SELECTION_MADE,
-                        status=AuditStatusEnum.SUCCESS,
-                        message_text=selection,
-                        response_text=response_message[:100],
-                        ip_address=ip_address,
-                    )
+                        logger.info(f"🎯 Menu selection: selection={selection}, new_state={new_state}, new_state.value={new_state.value if new_state else None}")
+
+                        # Handle appointment selection immediately without waiting for next message
+                        if new_state == ConversationStateEnum.APPOINTMENT_SELECTED:
+                            logger.info(f"🚀 Auto-processing APPOINTMENT_SELECTED immediately...")
+                            logger.info(f"   appointment_router: {self.appointment_router}")
+                            logger.info(f"   appointment_router.dentist_service: {self.appointment_router.dentist_service if self.appointment_router else 'N/A'}")
+                            new_state, response_message, context_data = await self.appointment_router.handle_appointment_request(session=self.session)
+                            logger.info(f"   ✅ handle_appointment_request() returned: new_state={new_state}, context_data keys={context_data.keys() if context_data else None}")
+
+                            update_metadata = {}
+                            if context_data:
+                                if "selected_dentist_id" in context_data:
+                                    update_metadata["selected_dentist_id"] = context_data["selected_dentist_id"]
+                                if "available_dentists" in context_data:
+                                    update_metadata["available_dentists"] = context_data["available_dentists"]
+                                    update_metadata["dentist_names"] = context_data.get("dentist_names", {})
+                                if "available_slots" in context_data:
+                                    update_metadata["available_slots"] = context_data["available_slots"]
+
+                            logger.info(f"   Calling update_state with new_state={new_state}, update_metadata={update_metadata.keys() if update_metadata else {}}")
+                            await self.conversation_manager.update_state(
+                                self.session,
+                                user.id,
+                                new_state,
+                                update_metadata=update_metadata,
+                            )
+
+                            logger.info(f"✅ APPOINTMENT_SELECTED processed, new_state={new_state}, final response_message={response_message[:60]}...")
+                        else:
+                            # For other selections (Secretary, etc.), just update state
+                            await self.conversation_manager.update_state(
+                                self.session, user.id, new_state
+                            )
+
+                        await self._log_audit(
+                            user_id=user.id,
+                            action=AuditActionEnum.MENU_SELECTION_MADE,
+                            status=AuditStatusEnum.SUCCESS,
+                            message_text=selection,
+                            response_text=response_message[:100],
+                            ip_address=ip_address,
+                        )
                 else:
                     # No selection; display or re-display menu
                     await self.conversation_manager.increment_menu_display_count(

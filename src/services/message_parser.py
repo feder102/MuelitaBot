@@ -72,6 +72,7 @@ class MessageParser:
         Returns:
             - "1" if user selected appointment option
             - "2" if user selected secretary option
+            - "3" if user selected cancel appointment option
             - None if message doesn't match menu options
         """
         if not message_text:
@@ -90,6 +91,40 @@ class MessageParser:
             logger.info(f"Menu selection detected: 2 (secretary)")
             return "2"
 
+        # Match cancel appointment selection (option 3)
+        elif normalized in ["3", "opción 3", "option 3", "cancelar turno", "cancelar"]:
+            logger.info(f"Menu selection detected: 3 (cancel appointment)")
+            return "3"
+
         # No match
         logger.info(f"No menu selection matched in: {message_text}")
+        return None
+
+    @staticmethod
+    def extract_cancellation_confirmation(message_text: Optional[str]) -> Optional[str]:
+        """
+        Extract yes/no confirmation from user message during cancellation flow.
+
+        Args:
+            message_text: User's message text
+
+        Returns:
+            - "si" if user confirmed cancellation
+            - "no" if user aborted cancellation
+            - None if message doesn't match either
+        """
+        if not message_text:
+            return None
+
+        normalized = message_text.strip().lower()
+
+        if normalized in ["si", "sí", "yes", "confirmar", "ok", "dale"]:
+            logger.info("Cancellation confirmation: YES")
+            return "si"
+
+        if normalized in ["no", "volver", "cancelar", "atras", "atrás"]:
+            logger.info("Cancellation confirmation: NO")
+            return "no"
+
+        logger.info(f"No cancellation confirmation matched in: {message_text}")
         return None

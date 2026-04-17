@@ -26,6 +26,10 @@ class ConversationStateEnum(str, Enum):
     # Feature 003: Multi-Dentist Booking
     SELECTING_DENTIST = "SELECTING_DENTIST"  # User selecting which dentist to book with
 
+    # Feature 004: Cancel Appointment
+    SELECTING_CANCELLATION_APPOINTMENT = "SELECTING_CANCELLATION_APPOINTMENT"  # User viewing cancellable appointment list
+    AWAITING_CANCELLATION_CONFIRMATION = "AWAITING_CANCELLATION_CONFIRMATION"  # User confirming which appointment to cancel
+
     # Terminal states
     COMPLETED = "COMPLETED"
     INACTIVE = "INACTIVE"

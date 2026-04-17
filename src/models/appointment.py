@@ -59,6 +59,9 @@ class Appointment(Base):
     )
     created_by_phone = Column(String(20), nullable=True)
 
+    # Google Calendar integration
+    google_event_id = Column(String(255), nullable=True, index=True)
+
     # Status & timestamps
     status = Column(
         SQLEnum(AppointmentStatusEnum),

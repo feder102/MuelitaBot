@@ -376,3 +376,51 @@ class GoogleCalendarClient:
         except Exception as e:
             logger.error(f"💥 Unexpected error creating event: {type(e).__name__}: {e}", exc_info=True)
             raise GoogleCalendarAPIError(f"Unexpected error: {e}")
+
+    async def delete_event(self, calendar_id: str, event_id: str) -> None:
+        """Delete an event from Google Calendar.
+
+        Args:
+            calendar_id: Google Calendar ID (dentist's calendar)
+            event_id: Google Calendar event ID to delete
+
+        Raises:
+            GoogleCalendarAuthError: If authentication fails
+            GoogleCalendarAPIError: If deletion fails for non-404 reasons
+        """
+        service = self._get_service()
+
+        try:
+            logger.info(f"🗑️ Deleting Google Calendar event: {event_id} from calendar: {calendar_id}")
+            loop = asyncio.get_event_loop()
+            request = service.events().delete(calendarId=calendar_id, eventId=event_id)
+
+            await asyncio.wait_for(
+                loop.run_in_executor(None, request.execute), timeout=10.0
+            )
+
+            logger.info(f"✅ Google Calendar event deleted successfully: {event_id}")
+
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ Google Calendar delete timed out for event: {event_id}")
+            raise GoogleCalendarTimeoutError("Event deletion timed out")
+        except HttpError as e:
+            if e.resp.status == 404:
+                logger.warning(
+                    f"⚠️ Google Calendar event not found (404) — already deleted: {event_id}"
+                )
+                return  # Not an error; event is already gone
+            elif e.resp.status == 401:
+                logger.error(f"🔒 Google Calendar authentication failed (401): {e}")
+                raise GoogleCalendarAuthError(f"Invalid credentials: {e}")
+            elif e.resp.status == 410:
+                logger.warning(
+                    f"⚠️ Google Calendar event already deleted (410 Gone): {event_id}"
+                )
+                return  # Not an error; event is already gone
+            else:
+                logger.error(f"⚠️ Google Calendar delete error ({e.resp.status}): {e}")
+                raise GoogleCalendarAPIError(f"Event deletion failed ({e.resp.status}): {e}")
+        except Exception as e:
+            logger.error(f"💥 Unexpected error deleting event: {type(e).__name__}: {e}", exc_info=True)
+            raise GoogleCalendarAPIError(f"Unexpected error: {e}")

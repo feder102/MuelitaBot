@@ -346,6 +346,13 @@ class AppointmentService:
                 f"Event ID: {event_id}, "
                 f"Link: {event_link}"
             )
+
+            # Persist event ID so cancellation can delete it later
+            if event_id and session:
+                appointment.google_event_id = event_id
+                await session.flush()
+                logger.info(f"✓ google_event_id saved to appointment: {event_id}")
+
             logger.info(
                 f"Booked appointment for user {patient_user_id} on "
                 f"{selected_slot.date} {selected_slot.start_time} (reason: {reason[:50]}...)"
