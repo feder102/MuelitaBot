@@ -1,11 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { appointments, dentists, ApiError } from '@/lib/api';
+import {
+  appointments,
+  dentists,
+  type AppointmentListItem,
+  type AppointmentListResponse,
+  type DentistListResponse,
+  ApiError,
+} from '@/lib/api';
 
 export default function DashboardPage() {
-  const [appointmentData, setAppointmentData] = useState<any>(null);
-  const [dentistData, setDentistData] = useState<any>(null);
+  const [appointmentData, setAppointmentData] = useState<AppointmentListResponse | null>(null);
+  const [dentistData, setDentistData] = useState<DentistListResponse | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -45,7 +52,7 @@ export default function DashboardPage() {
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-2">Turnos Próximos</h2>
           <p className="text-4xl font-bold text-blue-600">
-            {appointmentData?.items?.filter((a: any) => a.status === 'confirmed').length || 0}
+            {appointmentData?.items?.filter((a: AppointmentListItem) => a.status === 'CONFIRMED').length || 0}
           </p>
         </div>
         <div className="bg-white rounded-lg shadow p-6">
@@ -69,14 +76,14 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {appointmentData.items.slice(0, 5).map((a: any) => (
+              {appointmentData.items.slice(0, 5).map((a: AppointmentListItem) => (
                 <tr key={a.id} className="border-b hover:bg-gray-50">
                   <td className="py-2">{a.patient?.first_name} {a.patient?.last_name}</td>
                   <td className="py-2">{a.dentist?.name}</td>
                   <td className="py-2">{a.slot_date} {a.start_time}</td>
                   <td className="py-2">
                     <span className={`px-2 py-1 rounded text-sm font-semibold ${
-                      a.status === 'confirmed'
+                      a.status === 'CONFIRMED'
                         ? 'bg-green-100 text-green-800'
                         : 'bg-gray-100 text-gray-800'
                     }`}>

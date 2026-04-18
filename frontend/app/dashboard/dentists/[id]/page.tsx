@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { dentists, ApiError } from '@/lib/api';
+import { dentists, type DentistSummary, ApiError } from '@/lib/api';
 
 export default function DentistEditPage() {
   const router = useRouter();
   const params = useParams();
   const id = params?.id as string;
 
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<DentistSummary | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -19,7 +19,7 @@ export default function DentistEditPage() {
     const load = async () => {
       try {
         const result = await dentists.list();
-        const dentist = result.items.find((d: any) => d.id === id);
+        const dentist = result.items.find((d: DentistSummary) => d.id === id);
         if (dentist) {
           setData(dentist);
           setFormData({

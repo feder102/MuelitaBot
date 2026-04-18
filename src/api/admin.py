@@ -27,6 +27,14 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 failed_attempts = {}
 
 
+def parse_appointment_status(status_value: str) -> AppointmentStatusEnum:
+    """Normalize user-provided status filters."""
+    try:
+        return AppointmentStatusEnum(status_value.upper())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid appointment status") from exc
+
+
 def check_rate_limit(ip: str) -> bool:
     """Check if IP is rate limited."""
     now = datetime.now(timezone.utc)
@@ -129,6 +137,7 @@ async def list_appointments(
     page: int = 1,
     page_size: int = 50,
     session: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
 ):
     """List appointments with pagination."""
     stmt = select(Appointment).options(
@@ -137,7 +146,7 @@ async def list_appointments(
     )
 
     if status:
-        stmt = stmt.where(Appointment.status == AppointmentStatusEnum(status))
+        stmt = stmt.where(Appointment.status == parse_appointment_status(status))
 
     stmt = stmt.order_by(Appointment.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
 
@@ -147,7 +156,7 @@ async def list_appointments(
     # Count total
     count_stmt = select(func.count(Appointment.id))
     if status:
-        count_stmt = count_stmt.where(Appointment.status == AppointmentStatusEnum(status))
+        count_stmt = count_stmt.where(Appointment.status == parse_appointment_status(status))
     count_result = await session.execute(count_stmt)
     total = count_result.scalar()
 
@@ -157,7 +166,7 @@ async def list_appointments(
                 "id": str(a.id),
                 "patient": {"id": str(a.patient.id), "first_name": a.patient.first_name, "last_name": a.patient.last_name, "telegram_user_id": a.patient.telegram_user_id},
                 "dentist": {"id": str(a.dentist.id), "name": a.dentist.name},
-                "slot_date": str(a.slot_date),
+                "slot_date": str(a.appointment_date),
                 "start_time": str(a.start_time),
                 "end_time": str(a.end_time),
                 "reason": a.reason,
@@ -173,7 +182,11 @@ async def list_appointments(
 
 
 @router.get("/appointments/{id}")
-async def get_appointment(id: str, session: AsyncSession = Depends(get_db)):
+async def get_appointment(
+    id: str,
+    session: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+):
     """Get single appointment."""
     stmt = select(Appointment).where(Appointment.id == UUID(id)).options(
         selectinload(Appointment.patient),
@@ -189,7 +202,7 @@ async def get_appointment(id: str, session: AsyncSession = Depends(get_db)):
         "id": str(appointment.id),
         "patient": {"id": str(appointment.patient.id), "first_name": appointment.patient.first_name, "last_name": appointment.patient.last_name},
         "dentist": {"id": str(appointment.dentist.id), "name": appointment.dentist.name},
-        "slot_date": str(appointment.slot_date),
+        "slot_date": str(appointment.appointment_date),
         "start_time": str(appointment.start_time),
         "end_time": str(appointment.end_time),
         "reason": appointment.reason,
@@ -212,7 +225,7 @@ async def cancel_appointment(
         raise HTTPException(status_code=404, detail="Not found")
 
     if appointment.status != AppointmentStatusEnum.CONFIRMED:
-        raise HTTPException(status_code=409, detail="Appointment is already cancelled")
+        raise HTTPException(status_code=409, detail="Can only cancel confirmed appointments")
 
     appointment.status = AppointmentStatusEnum.CANCELLED
     await session.commit()
@@ -263,7 +276,10 @@ async def delete_appointment(
 
 # Dentists
 @router.get("/dentists")
-async def list_dentists(session: AsyncSession = Depends(get_db)):
+async def list_dentists(
+    session: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+):
     """List dentists."""
     stmt = select(Dentist).order_by(Dentist.name)
     result = await session.execute(stmt)
@@ -364,6 +380,7 @@ async def list_patients(
     page: int = 1,
     page_size: int = 50,
     session: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
 ):
     """List patients."""
     stmt = select(TelegramUser).order_by(TelegramUser.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
@@ -393,7 +410,11 @@ async def list_patients(
 
 
 @router.get("/patients/{id}")
-async def get_patient(id: str, session: AsyncSession = Depends(get_db)):
+async def get_patient(
+    id: str,
+    session: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+):
     """Get patient with appointments."""
     stmt = select(TelegramUser).where(TelegramUser.id == UUID(id)).options(
         selectinload(TelegramUser.appointments)
@@ -414,7 +435,7 @@ async def get_patient(id: str, session: AsyncSession = Depends(get_db)):
             {
                 "id": str(a.id),
                 "dentist": {"id": str(a.dentist_id), "name": a.dentist.name if a.dentist else None},
-                "slot_date": str(a.slot_date),
+                "slot_date": str(a.appointment_date),
                 "status": a.status.value,
             }
             for a in patient.appointments

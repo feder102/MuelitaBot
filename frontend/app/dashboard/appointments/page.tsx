@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { appointments, ApiError } from '@/lib/api';
+import { appointments, type AppointmentListItem, type AppointmentListResponse, ApiError } from '@/lib/api';
 
 export default function AppointmentsPage() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<AppointmentListResponse | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('');
@@ -38,8 +38,8 @@ export default function AppointmentsPage() {
           className="px-4 py-2 border rounded-md"
         >
           <option value="">Todos</option>
-          <option value="confirmed">Confirmados</option>
-          <option value="cancelled">Cancelados</option>
+          <option value="CONFIRMED">Confirmados</option>
+          <option value="CANCELLED">Cancelados</option>
         </select>
       </div>
 
@@ -63,7 +63,7 @@ export default function AppointmentsPage() {
               </tr>
             </thead>
             <tbody>
-              {data.items.map((a: any) => (
+              {data.items.map((a: AppointmentListItem) => (
                 <tr key={a.id} className="border-b hover:bg-gray-50">
                   <td className="px-6 py-3">{a.patient?.first_name} {a.patient?.last_name}</td>
                   <td className="px-6 py-3">{a.dentist?.name}</td>
@@ -71,7 +71,7 @@ export default function AppointmentsPage() {
                   <td className="px-6 py-3 text-sm">{a.reason}</td>
                   <td className="px-6 py-3">
                     <span className={`px-2 py-1 rounded text-sm font-semibold ${
-                      a.status === 'confirmed'
+                      a.status === 'CONFIRMED'
                         ? 'bg-green-100 text-green-800'
                         : 'bg-gray-100 text-gray-800'
                     }`}>

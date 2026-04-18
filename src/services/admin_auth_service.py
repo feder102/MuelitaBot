@@ -20,6 +20,16 @@ class AdminAuthService:
     """Manage admin authentication and JWT tokens."""
 
     @staticmethod
+    def _get_jwt_secret() -> str:
+        """Return a configured JWT secret for admin sessions."""
+        if len(settings.admin_jwt_secret) < 32:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="ADMIN_JWT_SECRET must be configured with at least 32 characters",
+            )
+        return settings.admin_jwt_secret
+
+    @staticmethod
     def verify_password(plain: str, hashed: str) -> bool:
         """Verify password against bcrypt hash."""
         return bcrypt.checkpw(plain.encode(), hashed.encode())
@@ -32,18 +42,20 @@ class AdminAuthService:
     @staticmethod
     def create_access_token(admin_id: UUID) -> str:
         """Create JWT token."""
+        secret = AdminAuthService._get_jwt_secret()
         payload = {
             "sub": str(admin_id),
             "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.admin_jwt_expire_minutes),
             "iat": datetime.now(timezone.utc),
         }
-        return jwt.encode(payload, settings.admin_jwt_secret, algorithm="HS256")
+        return jwt.encode(payload, secret, algorithm="HS256")
 
     @staticmethod
     async def get_current_admin(session: AsyncSession, token: str) -> AdminUser:
         """Validate JWT and return admin."""
+        secret = AdminAuthService._get_jwt_secret()
         try:
-            payload = jwt.decode(token, settings.admin_jwt_secret, algorithms=["HS256"])
+            payload = jwt.decode(token, secret, algorithms=["HS256"])
             admin_id = UUID(payload["sub"])
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
@@ -70,5 +82,4 @@ class AdminAuthService:
             return None
 
         return admin
-
 

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { patients, ApiError } from '@/lib/api';
+import { patients, type PatientListResponse, type PatientSummary, ApiError } from '@/lib/api';
 
 export default function PatientsPage() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<PatientListResponse | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -50,7 +50,7 @@ export default function PatientsPage() {
               </tr>
             </thead>
             <tbody>
-              {data.items.map((p: any) => (
+              {data.items.map((p: PatientSummary) => (
                 <tr key={p.id} className="border-b hover:bg-gray-50">
                   <td className="px-6 py-3">{p.first_name} {p.last_name}</td>
                   <td className="px-6 py-3 font-mono text-sm">{p.telegram_user_id}</td>

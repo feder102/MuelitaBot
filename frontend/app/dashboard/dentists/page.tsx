@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { dentists, ApiError } from '@/lib/api';
+import { dentists, type DentistListResponse, type DentistSummary, ApiError } from '@/lib/api';
 
 export default function DentistsPage() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<DentistListResponse | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -114,7 +114,7 @@ export default function DentistsPage() {
               </tr>
             </thead>
             <tbody>
-              {data.items.map((d: any) => (
+              {data.items.map((d: DentistSummary) => (
                 <tr key={d.id} className="border-b hover:bg-gray-50">
                   <td className="px-6 py-3">{d.name}</td>
                   <td className="px-6 py-3 text-sm">{d.calendar_id}</td>

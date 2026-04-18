@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { appointments, ApiError } from '@/lib/api';
+import { appointments, type AppointmentDetail, ApiError } from '@/lib/api';
 
 export default function AppointmentDetailPage() {
   const router = useRouter();
   const params = useParams();
   const id = params?.id as string;
 
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<AppointmentDetail | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -99,7 +99,7 @@ export default function AppointmentDetailPage() {
           <div>
             <p className="text-sm text-gray-600">Estado</p>
             <p className={`text-lg font-semibold ${
-              data.status === 'confirmed' ? 'text-green-600' : 'text-gray-600'
+              data.status === 'CONFIRMED' ? 'text-green-600' : 'text-gray-600'
             }`}>
               {data.status}
             </p>
@@ -107,7 +107,7 @@ export default function AppointmentDetailPage() {
         </div>
 
         <div className="flex gap-4">
-          {data.status === 'confirmed' && (
+          {data.status === 'CONFIRMED' && (
             <button
               onClick={() => setShowConfirm('cancel')}
               disabled={actionLoading}

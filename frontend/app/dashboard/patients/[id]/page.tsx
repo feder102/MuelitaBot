@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { patients, ApiError } from '@/lib/api';
+import { patients, type PatientAppointment, type PatientDetail, ApiError } from '@/lib/api';
 
 export default function PatientDetailPage() {
   const router = useRouter();
   const params = useParams();
   const id = params?.id as string;
 
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<PatientDetail | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -71,13 +71,13 @@ export default function PatientDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {data.appointments.map((a: any) => (
+              {data.appointments.map((a: PatientAppointment) => (
                 <tr key={a.id} className="border-b hover:bg-gray-50">
                   <td className="px-6 py-3">{a.dentist?.name || '-'}</td>
                   <td className="px-6 py-3">{a.slot_date}</td>
                   <td className="px-6 py-3">
                     <span className={`px-2 py-1 rounded text-sm font-semibold ${
-                      a.status === 'confirmed'
+                      a.status === 'CONFIRMED'
                         ? 'bg-green-100 text-green-800'
                         : 'bg-gray-100 text-gray-800'
                     }`}>
