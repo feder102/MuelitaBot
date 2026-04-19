@@ -1,6 +1,7 @@
 """Application configuration and settings."""
 import base64
 import json
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -36,8 +37,9 @@ class Settings(BaseSettings):
     appointment_reason_max_length: int = 150
 
     # Admin Dashboard Configuration (Feature 005)
-    admin_jwt_secret: str = ""
+    admin_jwt_secret: str
     admin_jwt_expire_minutes: int = 60
+    admin_dashboard_origins: str = ""
 
     class Config:
         env_file = ".env"
@@ -52,6 +54,34 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Check if running in production mode."""
         return self.api_env.lower() == "production"
+
+    @field_validator("admin_jwt_secret")
+    @classmethod
+    def validate_admin_jwt_secret(cls, value: str) -> str:
+        """Require a strong JWT signing secret."""
+        if len(value) < 32:
+            raise ValueError("ADMIN_JWT_SECRET must be at least 32 characters long")
+        return value
+
+    @property
+    def admin_dashboard_origins_list(self) -> list[str]:
+        """Parse admin dashboard origins from a comma-separated string."""
+        return [
+            origin.strip()
+            for origin in self.admin_dashboard_origins.split(",")
+            if origin.strip()
+        ]
+
+    @property
+    def cors_allowed_origins(self) -> list[str]:
+        """Return the configured CORS allowlist."""
+        if self.is_development:
+            return ["*"]
+
+        return [
+            "https://api.telegram.org",
+            *self.admin_dashboard_origins_list,
+        ]
 
     @property
     def google_calendar_credentials(self) -> dict:

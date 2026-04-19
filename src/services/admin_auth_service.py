@@ -1,33 +1,20 @@
 """Admin authentication service for Feature 005."""
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.models.admin_user import AdminUser
 
-logger = logging.getLogger(__name__)
-
 
 class AdminAuthService:
     """Manage admin authentication and JWT tokens."""
-
-    @staticmethod
-    def _get_jwt_secret() -> str:
-        """Return a configured JWT secret for admin sessions."""
-        if len(settings.admin_jwt_secret) < 32:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="ADMIN_JWT_SECRET must be configured with at least 32 characters",
-            )
-        return settings.admin_jwt_secret
 
     @staticmethod
     def verify_password(plain: str, hashed: str) -> bool:
@@ -42,20 +29,18 @@ class AdminAuthService:
     @staticmethod
     def create_access_token(admin_id: UUID) -> str:
         """Create JWT token."""
-        secret = AdminAuthService._get_jwt_secret()
         payload = {
             "sub": str(admin_id),
             "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.admin_jwt_expire_minutes),
             "iat": datetime.now(timezone.utc),
         }
-        return jwt.encode(payload, secret, algorithm="HS256")
+        return jwt.encode(payload, settings.admin_jwt_secret, algorithm="HS256")
 
     @staticmethod
     async def get_current_admin(session: AsyncSession, token: str) -> AdminUser:
         """Validate JWT and return admin."""
-        secret = AdminAuthService._get_jwt_secret()
         try:
-            payload = jwt.decode(token, secret, algorithms=["HS256"])
+            payload = jwt.decode(token, settings.admin_jwt_secret, algorithms=["HS256"])
             admin_id = UUID(payload["sub"])
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
@@ -82,4 +67,3 @@ class AdminAuthService:
             return None
 
         return admin
-

@@ -31,4 +31,4 @@
 
 ## Notes
 
-- FR-010 contains a [NEEDS CLARIFICATION] marker regarding authentication method — requires user input before proceeding to planning.
+- No open clarification markers remain in the current specification draft.

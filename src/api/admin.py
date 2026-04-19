@@ -1,12 +1,12 @@
 """Admin API router for Feature 005."""
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,9 +18,6 @@ from src.models.dentist import Dentist
 from src.models.telegram_user import TelegramUser
 from src.models.audit_log import AuditLog, AuditActionEnum, AuditStatusEnum
 from src.services.admin_auth_service import AdminAuthService
-from src.utils.logger import get_logger
-
-logger = get_logger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 # Rate limiting (in-memory, per IP)
@@ -40,9 +37,9 @@ def check_rate_limit(ip: str) -> bool:
     now = datetime.now(timezone.utc)
     if ip in failed_attempts:
         attempts, reset_time = failed_attempts[ip]
-        if now < reset_time:
+        if attempts >= 5 and now < reset_time:
             return False
-        else:
+        if now >= reset_time:
             del failed_attempts[ip]
     return True
 
@@ -96,6 +93,8 @@ async def login(
         record_failed_attempt(ip)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    failed_attempts.pop(ip, None)
+
     # Update last login
     admin.last_login_at = datetime.now(timezone.utc)
     await session.commit()
@@ -107,7 +106,7 @@ async def login(
         "session",
         token,
         httponly=True,
-        samesite="lax",
+        samesite="strict",
         max_age=settings.admin_jwt_expire_minutes * 60,
         secure=not settings.is_development,
     )
@@ -134,8 +133,8 @@ async def get_me(
 @router.get("/appointments")
 async def list_appointments(
     status: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 50,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     session: AsyncSession = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ):
@@ -148,7 +147,11 @@ async def list_appointments(
     if status:
         stmt = stmt.where(Appointment.status == parse_appointment_status(status))
 
-    stmt = stmt.order_by(Appointment.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    stmt = (
+        stmt.order_by(Appointment.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
 
     result = await session.execute(stmt)
     appointments = result.unique().scalars().all()
@@ -240,7 +243,7 @@ async def cancel_appointment(
     session.add(audit_log)
     await session.commit()
 
-    return {"ok": True, "id": str(appointment.id), "status": "cancelled"}
+    return {"ok": True, "id": str(appointment.id), "status": appointment.status.value}
 
 
 @router.delete("/appointments/{id}")
@@ -264,7 +267,7 @@ async def delete_appointment(
     # Audit log
     audit_log = AuditLog(
         user_id=patient_id,
-        action=AuditActionEnum.APPOINTMENT_CANCELLED,
+        action=AuditActionEnum.ADMIN_APPOINTMENT_DELETED,
         status=AuditStatusEnum.SUCCESS,
         message_text=f"Deleted by admin {admin.username}",
     )
@@ -299,7 +302,7 @@ async def list_dentists(
     }
 
 
-@router.post("/dentists")
+@router.post("/dentists", status_code=status.HTTP_201_CREATED)
 async def create_dentist(
     data: dict,
     session: AsyncSession = Depends(get_db),
@@ -317,13 +320,13 @@ async def create_dentist(
 
     try:
         await session.commit()
-    except Exception:
+    except IntegrityError:
         await session.rollback()
         raise HTTPException(status_code=422, detail="Duplicate name or calendar_id")
 
     # Audit log
     audit_log = AuditLog(
-        action=AuditActionEnum.MENU_DISPLAYED,
+        action=AuditActionEnum.ADMIN_DENTIST_CREATED,
         status=AuditStatusEnum.SUCCESS,
         message_text=f"Dentist {name} created by admin {admin.username}",
     )
@@ -362,9 +365,17 @@ async def update_dentist(
 
     try:
         await session.commit()
-    except Exception:
+    except IntegrityError:
         await session.rollback()
         raise HTTPException(status_code=422, detail="Duplicate name or calendar_id")
+
+    audit_log = AuditLog(
+        action=AuditActionEnum.ADMIN_DENTIST_UPDATED,
+        status=AuditStatusEnum.SUCCESS,
+        message_text=f"Dentist {dentist.name} updated by admin {admin.username}",
+    )
+    session.add(audit_log)
+    await session.commit()
 
     return {
         "id": str(dentist.id),
@@ -377,13 +388,18 @@ async def update_dentist(
 # Patients
 @router.get("/patients")
 async def list_patients(
-    page: int = 1,
-    page_size: int = 50,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     session: AsyncSession = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ):
     """List patients."""
-    stmt = select(TelegramUser).order_by(TelegramUser.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    stmt = (
+        select(TelegramUser)
+        .order_by(TelegramUser.updated_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     result = await session.execute(stmt)
     patients = result.scalars().all()
 
@@ -399,7 +415,7 @@ async def list_patients(
                 "first_name": p.first_name,
                 "last_name": p.last_name,
                 "username": p.username,
-                "last_interaction": p.created_at.isoformat() if p.created_at else None,
+                "last_interaction": p.updated_at.isoformat() if p.updated_at else None,
             }
             for p in patients
         ],
@@ -417,7 +433,7 @@ async def get_patient(
 ):
     """Get patient with appointments."""
     stmt = select(TelegramUser).where(TelegramUser.id == UUID(id)).options(
-        selectinload(TelegramUser.appointments)
+        selectinload(TelegramUser.appointments).selectinload(Appointment.dentist)
     )
     result = await session.execute(stmt)
     patient = result.unique().scalars().first()

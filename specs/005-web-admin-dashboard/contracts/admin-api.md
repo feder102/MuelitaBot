@@ -1,7 +1,7 @@
 # Admin API Contract (005)
 
 Base path: `/admin`  
-All endpoints require a valid session cookie (`Authorization` via HttpOnly JWT cookie).  
+All endpoints except login/logout require a valid session cookie (`session` via HttpOnly JWT cookie).  
 All responses: `Content-Type: application/json`.  
 All timestamps: ISO 8601 UTC.
 
@@ -49,7 +49,7 @@ Return current admin identity.
 
 **Response 200**:
 ```json
-{ "username": "admin" }
+{ "id": "uuid", "username": "admin" }
 ```
 
 **Response 401**: No/expired cookie.
@@ -61,7 +61,7 @@ Return current admin identity.
 ### GET /admin/appointments
 List all appointments, newest first.
 
-**Query params**: `status` (optional: `confirmed` | `cancelled`), `page` (default 1), `page_size` (default 50, max 200).
+**Query params**: `status` (optional: `CONFIRMED` | `CANCELLED`, case-insensitive), `page` (default 1), `page_size` (default 50, max 200).
 
 **Response 200**:
 ```json
@@ -73,9 +73,9 @@ List all appointments, newest first.
       "dentist": { "id": "uuid", "name": "Hector" },
       "slot_date": "2026-05-10",
       "start_time": "09:00",
-      "end_time": "09:30",
+      "end_time": "10:00",
       "reason": "Consulta de rutina",
-      "status": "confirmed",
+      "status": "CONFIRMED",
       "created_at": "2026-04-17T10:00:00Z"
     }
   ],
@@ -91,7 +91,7 @@ List all appointments, newest first.
 Get single appointment detail.
 
 **Response 200**: Same shape as single item above.  
-**Response 404**: `{ "error": "Not found" }`
+**Response 404**: `{ "ok": false, "error": "Not found" }`
 
 ---
 
@@ -100,12 +100,12 @@ Cancel a confirmed appointment.
 
 **Response 200**:
 ```json
-{ "ok": true, "id": "uuid", "status": "cancelled" }
+{ "ok": true, "id": "uuid", "status": "CANCELLED" }
 ```
 
-**Response 409** (already cancelled):
+**Response 409** (not confirmed):
 ```json
-{ "ok": false, "error": "Appointment is already cancelled" }
+{ "ok": false, "error": "Can only cancel confirmed appointments" }
 ```
 
 ---
@@ -118,7 +118,7 @@ Permanently delete an appointment record.
 { "ok": true }
 ```
 
-**Response 404**: `{ "error": "Not found" }`
+**Response 404**: `{ "ok": false, "error": "Not found" }`
 
 ---
 
@@ -151,7 +151,7 @@ Create a new dentist.
 { "id": "uuid", "name": "Dr. García", "calendar_id": "garcia@clinic.cal.google.com", "active_status": true }
 ```
 
-**Response 422**: Validation error (missing field, duplicate name/calendar_id).
+**Response 422**: `{ "ok": false, "error": "Human-readable validation error" }`
 
 ---
 
@@ -164,14 +164,14 @@ Update dentist fields (partial update).
 ```
 
 **Response 200**: Updated dentist object.  
-**Response 404**: Not found.
+**Response 404**: `{ "ok": false, "error": "Not found" }`
 
 ---
 
 ## Patients
 
 ### GET /admin/patients
-List all registered patients, newest first.
+List all registered patients, most recently updated first.
 
 **Query params**: `page`, `page_size`.
 
@@ -188,7 +188,9 @@ List all registered patients, newest first.
       "last_interaction": "2026-04-15T09:00:00Z"
     }
   ],
-  "total": 150
+  "total": 150,
+  "page": 1,
+  "page_size": 50
 }
 ```
 
@@ -205,7 +207,14 @@ Get patient detail with their appointments.
   "first_name": "Juan",
   "last_name": "Pérez",
   "username": "juanp",
-  "appointments": [ /* same shape as appointment list items */ ]
+  "appointments": [
+    {
+      "id": "uuid",
+      "dentist": { "id": "uuid", "name": "Hector" },
+      "slot_date": "2026-05-10",
+      "status": "CONFIRMED"
+    }
+  ]
 }
 ```
 

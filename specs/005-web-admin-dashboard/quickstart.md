@@ -62,16 +62,13 @@ Enter the credentials from step 2.
 ```bash
 # All tests
 pytest tests/ -v
-
-# Admin API tests only
-pytest tests/admin/ -v
 ```
 
-## Running frontend tests
+## Running frontend lint
 
 ```bash
 cd frontend
-npm test
+npm run lint
 ```
 
 ## Production build
@@ -94,3 +91,4 @@ npm start
 |----------|-------------|
 | `ADMIN_JWT_SECRET` | Secret key for signing JWT session tokens (min 32 chars) |
 | `ADMIN_JWT_EXPIRE_MINUTES` | Session token lifetime in minutes (default: 60) |
+| `ADMIN_DASHBOARD_ORIGINS` | Comma-separated production origins allowed by backend CORS |

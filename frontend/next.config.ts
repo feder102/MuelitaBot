@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
+const allowedDevOrigins = process.env.ALLOWED_DEV_ORIGINS
+  ?.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ['192.168.100.153', '100.124.221.119'],
+  ...(allowedDevOrigins?.length ? { allowedDevOrigins } : {}),
   async rewrites() {
     return [
       {

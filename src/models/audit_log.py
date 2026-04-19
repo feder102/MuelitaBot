@@ -1,7 +1,7 @@
 """AuditLog ORM model for immutable audit trail."""
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, ENUM
 from sqlalchemy.orm import relationship
 import uuid
@@ -23,6 +23,9 @@ class AuditActionEnum(str, Enum):
     DATABASE_ERROR = "DATABASE_ERROR"
     TELEGRAM_API_ERROR = "TELEGRAM_API_ERROR"
     APPOINTMENT_CANCELLED = "APPOINTMENT_CANCELLED"
+    ADMIN_APPOINTMENT_DELETED = "ADMIN_APPOINTMENT_DELETED"
+    ADMIN_DENTIST_CREATED = "ADMIN_DENTIST_CREATED"
+    ADMIN_DENTIST_UPDATED = "ADMIN_DENTIST_UPDATED"
 
 
 class AuditStatusEnum(str, Enum):
