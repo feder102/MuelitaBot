@@ -29,6 +29,7 @@ python-json-logger==2.0.7
 # Security
 bcrypt==4.1.0
 cryptography==41.0.7
+PyJWT==2.8.0
 
 # Testing (optional, for future)
 pytest==7.4.0
