@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0f;
+  --surface: #14141c;
+  --surface-2: #1c1c27;
+  --border: #262633;
+  --foreground: #ededf2;
+  --muted: #8b8b9e;
+  --primary: #7c5cff;
+  --primary-hover: #6a48f5;
+  --accent: #22d3ee;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background: var(--primary);
+  color: white;
+}
+
+.glow {
+  background:
+    radial-gradient(600px circle at 20% 0%, rgba(124, 92, 255, 0.15), transparent 60%),
+    radial-gradient(500px circle at 80% 20%, rgba(34, 211, 238, 0.08), transparent 60%);
+}
+
+.card-gradient {
+  background: linear-gradient(160deg, var(--surface-2), var(--surface));
+}
